@@ -1,8 +1,7 @@
-// Lexer for Custom Rentz Rules Engine
 const TokenType = {
   IDENTIFIER: 'IDENTIFIER',
   NUMBER: 'NUMBER',
-  STRING: 'STRING',
+  NEWLINE: 'NEWLINE',
   PUNCTUATION: 'PUNCTUATION',
   OPERATOR: 'OPERATOR',
   KEYWORD: 'KEYWORD',
@@ -10,7 +9,8 @@ const TokenType = {
 };
 
 const KEYWORDS = new Set(['if', 'elif', 'else', 'endif']);
-const OPERATORS = new Set(['+', '-', '*', '/', '<', '>', '<=', '>=', '==', '!=']);
+const WORD_OPERATORS = new Set(['not', 'and', 'or']);
+const SYMBOL_OPERATORS = new Set(['+', '-', '*', '/', '<', '>', '<=', '>=', '==', '!=']);
 const PUNCTUATION = new Set(['(', ')', ',', ';']);
 
 class Token {
@@ -24,108 +24,160 @@ class Token {
 
 class Lexer {
   constructor(input) {
-    this.input = input;
+    this.input = input || '';
     this.pos = 0;
     this.line = 1;
     this.column = 1;
   }
 
-  peek() {
-    return this.pos < this.input.length ? this.input[this.pos] : null;
+  peek(offset = 0) {
+    return this.input[this.pos + offset] || null;
   }
 
   advance() {
     const char = this.peek();
+
+    if (!char) {
+      return null;
+    }
+
+    this.pos += 1;
+
     if (char === '\n') {
-      this.line++;
+      this.line += 1;
       this.column = 1;
     } else {
-      this.column++;
+      this.column += 1;
     }
-    this.pos++;
+
     return char;
   }
 
-  skipWhitespace() {
-    while (this.peek() && /\s/.test(this.peek())) {
+  skipInlineWhitespace() {
+    while (this.peek() && /[ \t\r]/.test(this.peek())) {
       this.advance();
     }
   }
 
-  readNumber() {
-    let str = '';
-    while (this.peek() && /[0-9.]/.test(this.peek())) {
-      str += this.advance();
+  skipComment() {
+    while (this.peek() && this.peek() !== '\n') {
+      this.advance();
     }
-    return new Token(TokenType.NUMBER, parseFloat(str), this.line, this.column);
+  }
+
+  readNumberOrIdentifier() {
+    const startLine = this.line;
+    const startColumn = this.column;
+    let value = '';
+
+    while (this.peek() && /[0-9.]/.test(this.peek())) {
+      value += this.advance();
+    }
+
+    if (this.peek() && /[A-Za-z_]/.test(this.peek())) {
+      while (this.peek() && /[A-Za-z0-9_]/.test(this.peek())) {
+        value += this.advance();
+      }
+
+      return new Token(TokenType.IDENTIFIER, value, startLine, startColumn);
+    }
+
+    return new Token(TokenType.NUMBER, Number(value), startLine, startColumn);
   }
 
   readIdentifierOrKeyword() {
-    let str = '';
-    while (this.peek() && /[a-zA-Z0-9_\[\]]/.test(this.peek())) { // Brackets for [SUIT]_[VALUE] parsing natively if we want, or just handle variables.
-      str += this.advance();
-    }
-    
-    if (KEYWORDS.has(str)) {
-      return new Token(TokenType.KEYWORD, str, this.line, this.column);
-    }
-    if (str === 'not' || str === 'and' || str === 'or') {
-      return new Token(TokenType.OPERATOR, str, this.line, this.column);
-    }
-    return new Token(TokenType.IDENTIFIER, str, this.line, this.column);
-  }
+    const startLine = this.line;
+    const startColumn = this.column;
+    let value = '';
 
-  readString() {
-    let str = '';
-    const quote = this.advance(); // consume opening quote
-    while (this.peek() && this.peek() !== quote) {
-      str += this.advance();
+    while (this.peek() && /[A-Za-z0-9_]/.test(this.peek())) {
+      value += this.advance();
     }
-    this.advance(); // consume closing quote
-    return new Token(TokenType.STRING, str, this.line, this.column);
+
+    if (KEYWORDS.has(value)) {
+      return new Token(TokenType.KEYWORD, value, startLine, startColumn);
+    }
+
+    if (WORD_OPERATORS.has(value)) {
+      return new Token(TokenType.OPERATOR, value, startLine, startColumn);
+    }
+
+    return new Token(TokenType.IDENTIFIER, value, startLine, startColumn);
   }
 
   readOperator() {
-    let op = this.advance();
-    if (this.peek() && OPERATORS.has(op + this.peek())) {
-      op += this.advance();
+    const startLine = this.line;
+    const startColumn = this.column;
+    let value = this.advance();
+
+    if (this.peek() && SYMBOL_OPERATORS.has(value + this.peek())) {
+      value += this.advance();
     }
-    return new Token(TokenType.OPERATOR, op, this.line, this.column);
+
+    return new Token(TokenType.OPERATOR, value, startLine, startColumn);
   }
 
   nextToken() {
-    this.skipWhitespace();
+    while (true) {
+      this.skipInlineWhitespace();
+
+      if (this.peek() === '#') {
+        this.skipComment();
+        continue;
+      }
+
+      break;
+    }
+
     const char = this.peek();
 
     if (!char) {
       return new Token(TokenType.EOF, null, this.line, this.column);
     }
 
-    if (/[0-9]/.test(char)) return this.readNumber();
-    if (/[a-zA-Z_\[]/.test(char)) return this.readIdentifierOrKeyword(); // Starts with letter, underscore or bracket
-    if (char === '"' || char === "'") return this.readString();
-    
-    if (PUNCTUATION.has(char)) {
+    if (char === '\n') {
+      const line = this.line;
+      const column = this.column;
       this.advance();
-      return new Token(TokenType.PUNCTUATION, char, this.line, this.column - 1);
+      return new Token(TokenType.NEWLINE, '\n', line, column);
     }
 
-    if (OPERATORS.has(char) || char === '=' || char === '!') {
+    if (/[0-9]/.test(char)) {
+      return this.readNumberOrIdentifier();
+    }
+
+    if (/[A-Za-z_]/.test(char)) {
+      return this.readIdentifierOrKeyword();
+    }
+
+    if (PUNCTUATION.has(char)) {
+      const line = this.line;
+      const column = this.column;
+      this.advance();
+      return new Token(TokenType.PUNCTUATION, char, line, column);
+    }
+
+    if ('+-*/<>!='.includes(char)) {
       return this.readOperator();
     }
 
-    throw new Error(`Unknown character: ${char} at line ${this.line}:${this.column}`);
+    throw new Error(`Unexpected character '${char}' at ${this.line}:${this.column}`);
   }
 
   tokenize() {
     const tokens = [];
     let token;
+
     do {
       token = this.nextToken();
       tokens.push(token);
     } while (token.type !== TokenType.EOF);
+
     return tokens;
   }
 }
 
-module.exports = { Lexer, TokenType };
+module.exports = {
+  Lexer,
+  TokenType
+};

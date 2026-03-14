@@ -2,11 +2,14 @@ const mongoose = require('mongoose');
 
 const rulesetSchema = new mongoose.Schema({
   title: { type: String, required: true },
-  authorId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
-  code: { type: String, required: true }, // The stringified formal rules code
-  upvotes: { type: Number, default: 0 },
+  description: { type: String, default: '' },
+  author: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   type: { type: String, enum: ['per_round', 'end_game'], required: true },
-  isPublic: { type: Boolean, default: false } // Determines if available in Marketplace
+  code: { type: String, required: true },
+  tags: { type: [String], default: [] },
+  upvoteCount: { type: Number, default: 0 },
+  downloadCount: { type: Number, default: 0 },
+  isPublic: { type: Boolean, default: false }
 }, { timestamps: true });
 
 module.exports = mongoose.model('Ruleset', rulesetSchema);

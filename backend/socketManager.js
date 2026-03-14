@@ -1,12 +1,49 @@
 const Game = require('./models/Game');
 const User = require('./models/User');
-const { generateFriendCode } = require('./utils/helpers');
+const { randomFriendCode } = require('./utils/helpers');
 const { generateDeck, shuffle, dealCards } = require('./utils/cards');
 
 // In-memory lobby management
 const lobbies = new Map(); // roomId -> Set(socketIds)
 const activeGames = new Map(); // roomId -> game state
 const socketToUser = new Map(); // socketId -> { userId, name }
+const SUIT_NAMES = {
+  H: 'Hearts',
+  D: 'Diamonds',
+  C: 'Clubs',
+  S: 'Spades'
+};
+
+function buildCardCounts(game) {
+  return game.players.reduce((acc, player) => {
+    acc[player.userId] = game.handsReady[player.userId].length;
+    return acc;
+  }, {});
+}
+
+function buildCollectedHands(game) {
+  return game.players.reduce((acc, player) => {
+    acc[player.userId] = game.collectedByPlayer[player.userId] || [];
+    return acc;
+  }, {});
+}
+
+function buildStandings(game) {
+  return game.players
+    .map((player) => ({
+      userId: player.userId,
+      name: player.name,
+      tricksWon: (game.collectedByPlayer[player.userId] || []).length,
+      cardsLeft: game.handsReady[player.userId].length
+    }))
+    .sort((left, right) => {
+      if (right.tricksWon !== left.tricksWon) {
+        return right.tricksWon - left.tricksWon;
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+}
 
 module.exports = function (io) {
   io.on('connection', (socket) => {
@@ -15,7 +52,9 @@ module.exports = function (io) {
     // Basic authentication simulation for socket (in final, verify JWT or magic link)
     socket.on('authenticate', (userData) => {
       socketToUser.set(socket.id, userData);
-      console.log(`Socket ${socket.id} authenticated as ${userData.name}`);
+      console.log(
+        `Socket ${socket.id} authenticated as ${userData.displayName || userData.name}`
+      );
     });
 
     // 1. Create a Lobby
@@ -24,7 +63,7 @@ module.exports = function (io) {
       if (!user) return callback({ error: 'Not authenticated' });
 
       // Generate a short 6-letter room code
-      const roomId = generateFriendCode();
+      const roomId = randomFriendCode();
       socket.join(roomId);
       
       lobbies.set(roomId, {
@@ -34,7 +73,7 @@ module.exports = function (io) {
         status: 'waiting'
       });
 
-      console.log(`Room ${roomId} created by ${user.name}`);
+      console.log(`Room ${roomId} created by ${user.displayName || user.name}`);
       callback({ success: true, roomId });
     });
 
@@ -90,14 +129,22 @@ module.exports = function (io) {
         roomId,
         hostId: lobby.hostId,
         rulesetId: lobby.rulesetId,
-        players: lobby.players.map(p => ({ userId: p.userId, socketId: p.socketId, name: p.name })),
+        players: lobby.players.map(p => ({
+          userId: p.userId,
+          socketId: p.socketId,
+          name: p.displayName || p.name
+        })),
         status: 'playing',
         handsReady: hands,
         turnIndex: 0,
         trickPending: false,
         currentTrick: [], // cards played this round
         trickSuit: null,
-        collectedHands: [] // History of hands collected
+        collectedHands: [], // History of hands collected
+        collectedByPlayer: playerIds.reduce((acc, playerId) => {
+          acc[playerId] = [];
+          return acc;
+        }, {})
       };
 
       activeGames.set(roomId, gameState);
@@ -129,7 +176,10 @@ module.exports = function (io) {
             message: 'The game has begun!',
             hand: hands[p.userId],
             playerIndex: index,
-            turnIndex: 0
+            turnIndex: 0,
+            trickSuit: null,
+            cardCounts: buildCardCounts(gameState),
+            collectedHandsByPlayer: buildCollectedHands(gameState)
           });
         });
         
@@ -168,7 +218,10 @@ module.exports = function (io) {
         if (playSuit !== game.trickSuit) {
           const hasSuit = hand.some(c => c.split('-')[1] === game.trickSuit);
           if (hasSuit) {
-            socket.emit('game_error', `You must play a card of suit ${game.trickSuit}`);
+            socket.emit(
+              'game_error',
+              `You must play a card of suit ${SUIT_NAMES[game.trickSuit] || game.trickSuit}`
+            );
             return;
           }
         }
@@ -177,7 +230,11 @@ module.exports = function (io) {
       // Remove card from hand
       game.handsReady[user.userId] = hand.filter(c => c !== card);
       
-      game.currentTrick.push({ playedBy: user.userId, playerName: user.name, card });
+      game.currentTrick.push({
+        playedBy: user.userId,
+        playerName: user.displayName || user.name,
+        card
+      });
       
       // Advance turn sequentially
       game.turnIndex = (game.turnIndex + 1) % game.players.length;
@@ -186,10 +243,7 @@ module.exports = function (io) {
         currentTrick: game.currentTrick,
         turnIndex: game.turnIndex,
         trickSuit: game.trickSuit,
-        cardCounts: game.players.reduce((acc, p) => {
-          acc[p.userId] = game.handsReady[p.userId].length;
-          return acc;
-        }, {})
+        cardCounts: buildCardCounts(game)
       });
       
       socket.emit('hand_update', game.handsReady[user.userId]);
@@ -215,24 +269,47 @@ module.exports = function (io) {
         
         const winningPlay = game.currentTrick[winnerIndex];
         game.collectedHands.push(game.currentTrick);
+        game.collectedByPlayer[winningPlay.playedBy].push([...game.currentTrick]);
         
         // Trick winner goes first next round
         game.turnIndex = game.players.findIndex(p => p.userId === winningPlay.playedBy);
         
         io.to(roomId).emit('trick_won', {
            winnerName: winningPlay.playerName,
-           winnerId: winningPlay.playedBy
+           winnerId: winningPlay.playedBy,
+           trickSuit: game.trickSuit,
+           collectedHandsByPlayer: buildCollectedHands(game),
+           cardCounts: buildCardCounts(game)
         });
         
         setTimeout(() => {
           game.currentTrick = [];
           game.trickSuit = null;
           game.trickPending = false;
+          const allHandsEmpty = game.players.every(
+            (player) => game.handsReady[player.userId].length === 0
+          );
           
           io.to(roomId).emit('trick_end', {
             nextTurnIndex: game.turnIndex,
-            collectedHandsCount: game.collectedHands.length
+            collectedHandsCount: game.collectedHands.length,
+            trickSuit: null,
+            collectedHandsByPlayer: buildCollectedHands(game),
+            cardCounts: buildCardCounts(game),
+            gameFinished: allHandsEmpty
           });
+
+          if (allHandsEmpty) {
+            game.status = 'finished';
+
+            io.to(roomId).emit('game_finished', {
+              winnerId: winningPlay.playedBy,
+              winnerName: winningPlay.playerName,
+              standings: buildStandings(game),
+              collectedHandsByPlayer: buildCollectedHands(game),
+              cardCounts: buildCardCounts(game)
+            });
+          }
         }, 1500); // 1.5-second delay to animate sliding cards
       }
     });

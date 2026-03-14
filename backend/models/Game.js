@@ -1,16 +1,38 @@
 const mongoose = require('mongoose');
 
+const gamePlayerSchema = new mongoose.Schema({
+  user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  seatIndex: { type: Number, required: true },
+  isReady: { type: Boolean, default: false },
+  isConnected: { type: Boolean, default: true }
+}, { _id: false });
+
 const gameSchema = new mongoose.Schema({
-  roomId: { type: String, required: true, unique: true },
-  hostId: { type: String, required: true }, // Changed to String temporarily for mock Auth
-  rulesetId: { type: String }, // optional string
-  players: [{ type: String }], // Changed to string for mock Auth
+  roomCode: { type: String, required: true, unique: true, index: true },
+  visibility: {
+    type: String,
+    enum: ['private', 'friends', 'public'],
+    default: 'private'
+  },
+  host: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  ruleset: { type: mongoose.Schema.Types.ObjectId, ref: 'Ruleset', default: null },
+  players: [gamePlayerSchema],
+  status: {
+    type: String,
+    enum: ['waiting', 'playing', 'finished'],
+    default: 'waiting'
+  },
   state: {
-    status: { type: String, enum: ['waiting', 'playing', 'finished'], default: 'waiting' },
-    hands: [], // History of hands collected
-    cards: {}, // Map of player to cards
-    points: {}, // Map of player to points
-    snapshot: {} // The current context evaluated by the Rules Engine
+    phase: { type: String, default: 'lobby' },
+    dealerIndex: { type: Number, default: 0 },
+    currentTurnIndex: { type: Number, default: 0 },
+    mainSuit: { type: String, default: null },
+    currentHand: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    collectedHands: { type: [mongoose.Schema.Types.Mixed], default: [] },
+    playerHands: { type: mongoose.Schema.Types.Mixed, default: {} },
+    points: { type: mongoose.Schema.Types.Mixed, default: {} },
+    totalPoints: { type: mongoose.Schema.Types.Mixed, default: {} },
+    sharedSnapshot: { type: mongoose.Schema.Types.Mixed, default: {} }
   }
 }, { timestamps: true });
 

@@ -1,84 +1,154 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { Lexer } = require('../engine/lexer');
-const { Parser } = require('../engine/parser');
-const { Evaluator } = require('../engine/evaluator');
+const {
+  buildRuleSnapshot,
+  compileRuleset,
+  evaluateIsolatedHands,
+  evaluateRuleWithSnapshot
+} = require('../engine/evaluator');
 
-function runRules(code, snapshot) {
-  const lexer = new Lexer(code);
-  const parser = new Parser(lexer.tokenize());
-  const ast = parser.parse();
-  const evaluator = new Evaluator(ast, snapshot);
-  return evaluator.evaluate();
-}
+test('builds snapshot variables for hand cards and non-discarded cards', () => {
+  const snapshot = buildRuleSnapshot({
+    playerCount: 4,
+    initialPoints: 12,
+    handCards: ['K-H', 'A-S', '10-S'],
+    nonDiscardedCards: ['K-H', 'A-S', '10-S', 'Q-D', '2-C']
+  });
 
-test('Simple add(5, SPADE_NR >= 3)', (t) => {
-  const code = 'add(5, SPADE_NR >= 3);';
-  
-  // Case 1: SPADE_NR is 3 -> Condition true -> POINTS += 5
-  let res1 = runRules(code, { INITIAL_POINTS: 10, SPADE_NR: 3 });
-  assert.strictEqual(res1.POINTS, 15);
-
-  // Case 2: SPADE_NR is 2 -> Condition false -> POINTS unchanged
-  let res2 = runRules(code, { INITIAL_POINTS: 10, SPADE_NR: 2 });
-  assert.strictEqual(res2.POINTS, 10);
+  assert.strictEqual(snapshot.PLAYER_COUNT, 4);
+  assert.strictEqual(snapshot.INITIAL_POINTS, 12);
+  assert.strictEqual(snapshot.CARD_NR, 3);
+  assert.strictEqual(snapshot.HEART_NR, 1);
+  assert.strictEqual(snapshot.SPADE_NR, 2);
+  assert.strictEqual(snapshot.TOTAL_SPADE_NR, 2);
+  assert.strictEqual(snapshot.K_NR, 1);
+  assert.strictEqual(snapshot.TOTAL_Q_NR, 1);
+  assert.strictEqual(snapshot.HEART_K, true);
+  assert.strictEqual(snapshot.DIAMOND_Q, false);
 });
 
-test('if / else blocks and game_end()', (t) => {
+test('evaluates add with snapshot variables', () => {
+  const ruleset = compileRuleset('add(5, SPADE_NR >= 2)', 'per_round');
+  const result = evaluateRuleWithSnapshot(
+    ruleset,
+    buildRuleSnapshot({
+      playerCount: 4,
+      initialPoints: 10,
+      handCards: ['A-S', '10-S'],
+      nonDiscardedCards: ['A-S', '10-S', 'K-H']
+    })
+  );
+
+  assert.strictEqual(result.POINTS, 15);
+  assert.strictEqual(result.TOTAL_POINTS, 0);
+  assert.strictEqual(result.gameEnded, false);
+});
+
+test('supports if / elif / else blocks and game_end', () => {
   const code = `
     if(HEART_KING)
-      add(-100);
-      game_end();
+      add(-100)
+      game_end()
+    elif(CARD_NR == 2 and SPADE_NR > 0)
+      add(10)
     else
-      add(10);
+      set_to(0)
     endif
   `;
-  
-  let res1 = runRules(code, { INITIAL_POINTS: 0, HEART_KING: true });
-  assert.strictEqual(res1.POINTS, -100);
-  assert.strictEqual(res1.gameEnded, true);
-  
-  let res2 = runRules(code, { INITIAL_POINTS: 0, HEART_KING: false });
-  assert.strictEqual(res2.POINTS, 10);
-  assert.strictEqual(res2.gameEnded, false);
+
+  const ruleset = compileRuleset(code, 'per_round');
+
+  const heartKingResult = evaluateRuleWithSnapshot(
+    ruleset,
+    buildRuleSnapshot({
+      playerCount: 4,
+      initialPoints: 0,
+      handCards: ['K-H'],
+      nonDiscardedCards: ['K-H', 'A-S']
+    })
+  );
+
+  const elifResult = evaluateRuleWithSnapshot(
+    ruleset,
+    buildRuleSnapshot({
+      playerCount: 4,
+      initialPoints: 20,
+      handCards: ['A-S', '9-H'],
+      nonDiscardedCards: ['A-S', '9-H', 'Q-D']
+    })
+  );
+
+  const elseResult = evaluateRuleWithSnapshot(
+    ruleset,
+    buildRuleSnapshot({
+      playerCount: 4,
+      initialPoints: 20,
+      handCards: ['Q-D', '9-H', '2-C'],
+      nonDiscardedCards: ['Q-D', '9-H', '2-C', 'A-S']
+    })
+  );
+
+  assert.strictEqual(heartKingResult.POINTS, -100);
+  assert.strictEqual(heartKingResult.gameEnded, true);
+  assert.strictEqual(elifResult.POINTS, 30);
+  assert.strictEqual(elifResult.gameEnded, false);
+  assert.strictEqual(elseResult.POINTS, 0);
 });
 
-test('Multiple conditions with elif', (t) => {
-  const code = `
-    if(CARD_NR == 1)
-      add(5);
-    elif(CARD_NR == 2 and SPADES_NR > 0)
-      add(10);
-    else
-      set_to(0);
-    endif
-  `;
-  
-  let res1 = runRules(code, { INITIAL_POINTS: 20, CARD_NR: 1, SPADES_NR: 0 });
-  assert.strictEqual(res1.POINTS, 25);
-  
-  let res2 = runRules(code, { INITIAL_POINTS: 20, CARD_NR: 2, SPADES_NR: 1 });
-  assert.strictEqual(res2.POINTS, 30);
-  
-  let res3 = runRules(code, { INITIAL_POINTS: 20, CARD_NR: 3 });
-  assert.strictEqual(res3.POINTS, 0);
-});
-
-test('reset_to changes TOTAL_POINTS', (t) => {
+test('reset_to changes only TOTAL_POINTS', () => {
   const code = `
     if(HEART_KING)
-      reset_to(1000);
+      reset_to(1000)
     endif
   `;
-  let res = runRules(code, { INITIAL_POINTS: 50, HEART_KING: true });
-  assert.strictEqual(res.POINTS, 50, 'reset_to should not modify small-game hand points directly according to new specs, or if it does, it sets total');
-  assert.strictEqual(res.TOTAL_POINTS, 1000);
+  const result = evaluateRuleWithSnapshot(
+    compileRuleset(code, 'end_game'),
+    buildRuleSnapshot({
+      playerCount: 4,
+      initialPoints: 50,
+      handCards: ['K-H'],
+      nonDiscardedCards: ['K-H', 'Q-D']
+    })
+  );
+
+  assert.strictEqual(result.POINTS, 50);
+  assert.strictEqual(result.TOTAL_POINTS, 1000);
 });
 
-test('Math operations with constants and variables', (t) => {
-  const code = 'add(-3 * POINTS, CARD_NR >= 2);';
-  
-  // POINTS starts at INITIAL_POINTS = 10. -3 * 10 = -30. 10 + (-30) = -20.
-  let res = runRules(code, { INITIAL_POINTS: 10, CARD_NR: 5 });
-  assert.strictEqual(res.POINTS, -20);
+test('evaluates isolated hands from the same ruleset without state bleed', () => {
+  const code = `
+    add(5, HEART_NR >= 1)
+    reset_to(100, SPADE_A)
+  `;
+
+  const result = evaluateIsolatedHands({
+    code,
+    type: 'per_round',
+    evaluations: [
+      {
+        playerCount: 4,
+        initialPoints: 10,
+        handCards: ['A-S', 'K-H'],
+        nonDiscardedCards: ['A-S', 'K-H', 'Q-D', '2-C']
+      },
+      {
+        playerCount: 4,
+        initialPoints: 10,
+        handCards: ['Q-D'],
+        nonDiscardedCards: ['A-S', 'K-H', 'Q-D', '2-C']
+      }
+    ]
+  });
+
+  assert.strictEqual(result.results.length, 2);
+  assert.deepStrictEqual(result.results[0], {
+    POINTS: 15,
+    TOTAL_POINTS: 100,
+    gameEnded: false
+  });
+  assert.deepStrictEqual(result.results[1], {
+    POINTS: 10,
+    TOTAL_POINTS: 0,
+    gameEnded: false
+  });
 });
