@@ -10,7 +10,6 @@ import {
   LogIn,
   Settings,
   Sparkles,
-  Store,
   Swords,
   Trophy,
   UserRound,
@@ -759,7 +758,7 @@ function App() {
     { id: 'play', label: 'Play', icon: Home },
     { id: 'friends', label: 'Friends', icon: Users },
     { id: 'library', label: 'Library', icon: Library },
-    { id: 'market', label: 'Marketplace', icon: Store },
+    { id: 'ruleset-rater', label: 'Ruleset Rater', icon: Users2 },
     { id: 'editor', label: 'Editor', icon: FileCode2 },
     ...(!isAuthenticated ? [{ id: 'login', label: 'Login', icon: LogIn }] : [])
   ];
@@ -1579,14 +1578,14 @@ endif`}
     if (activeTab === 'library') {
       return renderPlaceholderModule(
         'Library',
-        'Saved rulesets, downloaded marketplace picks, and your own authored presets will be surfaced here. The editor tab now gives us the creation flow to pair with this library view.'
+        'Saved rulesets, picks from the Ruleset Rater, and your own authored presets will be surfaced here. The editor tab now gives us the creation flow to pair with this library view.'
       );
     }
 
-    if (activeTab === 'market') {
+    if (activeTab === 'ruleset-rater') {
       return renderPlaceholderModule(
-        'Marketplace',
-        'Community rulesets will appear here with upvotes, downloads, and quick-save actions once the marketplace endpoints are fully hooked up.'
+        'Ruleset Rater',
+        'Shared community rulesets will appear here with ratings, downloads, and quick-save actions once the Ruleset Rater endpoints are fully hooked up.'
       );
     }
 
@@ -1694,7 +1693,7 @@ endif`}
             <div className="subpage-viewport">
               <div className="subpage-content">
                 <header className="mb-6 flex shrink-0 flex-col gap-3">
-                  <h2 className="flex items-center gap-3 text-[2rem] font-display font-black capitalize tracking-tight text-[var(--text-primary)] drop-shadow-sm sm:text-3xl md:text-[4rem]">
+                  <h2 className="flex items-center gap-3 pt-1 text-[2rem] font-display font-black capitalize leading-[1.08] tracking-tight text-[var(--text-primary)] drop-shadow-sm sm:text-3xl md:text-[4rem]">
                     {activeTab === 'play' && !inLobby && <Swords className="h-8 w-8 opacity-70 sm:h-10 sm:w-10" />}
                     {activeTab}
                   </h2>

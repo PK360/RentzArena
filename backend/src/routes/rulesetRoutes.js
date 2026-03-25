@@ -9,7 +9,7 @@ const {
 
 const router = express.Router();
 
-router.get('/marketplace', async (_req, res, next) => {
+router.get('/ruleset-rater', async (_req, res, next) => {
   try {
     const rulesets = await Ruleset.find({ isPublic: true })
       .populate('author', 'displayName friendCode')
