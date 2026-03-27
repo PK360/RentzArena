@@ -46,13 +46,7 @@ const STORAGE_KEYS = {
 };
 const FONT_SCALE_RANGE = { min: 70, max: 130, step: 5, defaultValue: 100 };
 const PAGE_ZOOM_RANGE = { min: 100, max: 125, step: 5, defaultValue: 100 };
-const OPPONENT_LAYOUTS = [
-  'left-1/2 top-4 -translate-x-1/2 sm:top-10 md:top-7',
-  'left-1 top-[36%] -translate-y-1/2 sm:left-3 sm:top-[42%] md:left-4 md:top-1/2',
-  'right-1 top-[36%] -translate-y-1/2 sm:right-3 sm:top-[42%] md:right-4 md:top-1/2',
-  'left-[12%] top-[11%] sm:left-[18%] sm:top-[18%] md:top-[14%]',
-  'right-[12%] top-[11%] sm:right-[18%] sm:top-[18%] md:top-[14%]'
-];
+const OPPONENT_SEAT_ROLES = ['top', 'left', 'right', 'top-left', 'top-right'];
 
 function createStepValues(min, max, step) {
   const values = [];
@@ -92,28 +86,6 @@ function readStoredPreference(key, fallback, allowedValues) {
   }
 }
 
-function getSeatRoleForPlayer(playerId, myPlayerId, opponents) {
-  if (playerId === myPlayerId) {
-    return 'bottom';
-  }
-
-  const opponentIndex = opponents.findIndex((player) => player.userId === playerId);
-  return ['top', 'left', 'right', 'top-left', 'top-right'][opponentIndex] || 'top';
-}
-
-function getCollectionOffset(seatRole) {
-  const offsets = {
-    top: { x: 0, y: -170, rotate: -12 },
-    left: { x: -220, y: -40, rotate: -24 },
-    right: { x: 220, y: -40, rotate: 24 },
-    bottom: { x: 0, y: 190, rotate: 8 },
-    'top-left': { x: -150, y: -140, rotate: -18 },
-    'top-right': { x: 150, y: -140, rotate: 18 }
-  };
-
-  return offsets[seatRole] || offsets.top;
-}
-
 function parseCard(cardString) {
   const [value, suit] = cardString.split('-');
   return { value, suit };
@@ -135,6 +107,67 @@ function sortCards(cards) {
 
 function getPlayerName(player) {
   return player?.name || player?.displayName || 'Player';
+}
+
+function getPlayerInitials(player) {
+  const name = getPlayerName(player).trim();
+  if (!name) {
+    return 'P';
+  }
+
+  const parts = name.split(/\s+/).filter(Boolean);
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toUpperCase();
+  }
+
+  return `${parts[0][0] || ''}${parts[1][0] || ''}`.toUpperCase();
+}
+
+function getPlayerAvatarSource(player) {
+  return (
+    player?.avatarUrl ||
+    player?.avatar ||
+    player?.profileImageUrl ||
+    player?.profileImage ||
+    player?.image ||
+    null
+  );
+}
+
+function getPlayerRating(player) {
+  return player?.elo ?? player?.rating ?? player?.mmr ?? player?.rank ?? null;
+}
+
+function getPlayerPoints(player) {
+  return player?.points ?? player?.score ?? player?.totalPoints ?? null;
+}
+
+function getPlayerPresence(player) {
+  if (typeof player?.isConnected === 'boolean') {
+    return player.isConnected;
+  }
+
+  if (typeof player?.connected === 'boolean') {
+    return player.connected;
+  }
+
+  return Boolean(player?.socketId || player?.userId);
+}
+
+function formatMetaValue(value, fallback = '--') {
+  if (value == null || value === '') {
+    return fallback;
+  }
+
+  return `${value}`;
+}
+
+function formatMarkingSuit(trickSuit) {
+  if (!trickSuit) {
+    return 'Waiting...';
+  }
+
+  return `${SUIT_NAMES[trickSuit].toUpperCase()} ${SUIT_SYMBOLS[trickSuit]}`;
 }
 
 function canPlayCard({ card, hand, trickSuit, isMyTurn, trickPending }) {
@@ -285,27 +318,163 @@ function SettingsSlider({ title, description, min, max, step, value, defaultValu
   );
 }
 
-function OpponentSeat({ player, positionClass, isTurn, cardCount, tricksWon, isWinner }) {
+function ChromePanelHeader({ title, accent = 'neutral' }) {
   return (
-    <div className={clsx('opponent-seat absolute z-20 flex w-24 flex-col items-center gap-1.5 sm:w-32 sm:gap-2 md:w-36', positionClass)}>
-      <div className="relative flex h-8 w-full items-center justify-center sm:h-10 md:h-14">
-        <div className="absolute left-2 top-2 h-10 w-7 rotate-[-10deg] rounded-xl border border-slate-300 bg-white/95 shadow-[0_6px_16px_rgba(0,0,0,0.15)] sm:left-3 sm:top-3 sm:h-14 sm:w-10 sm:rounded-2xl md:h-16 md:w-11" />
-        <div className="absolute right-2 top-2 h-10 w-7 rotate-[10deg] rounded-xl border border-slate-300 bg-white/95 shadow-[0_6px_16px_rgba(0,0,0,0.15)] sm:right-3 sm:top-3 sm:h-14 sm:w-10 sm:rounded-2xl md:h-16 md:w-11" />
-        <div className={clsx('seat-avatar relative z-10', isWinner && 'seat-avatar-winner')}>
-          {getPlayerName(player).charAt(0).toUpperCase()}
-        </div>
+    <div className="rentz-panel-header">
+      <div className="rentz-panel-dots" aria-hidden="true">
+        <span className="is-red" />
+        <span className="is-yellow" />
+        <span className="is-green" />
       </div>
-      <div className={clsx('seat-chip min-w-full px-2 py-1.5 text-center transition-all duration-500 sm:px-3 sm:py-2', isTurn && 'ring-2 ring-white/70', isWinner && 'seat-chip-winner')}>
-        <div className="truncate text-[11px] font-black text-[var(--seat-chip-text)] sm:text-sm md:text-base">
-          {getPlayerName(player)}
-        </div>
-        <div className="mt-1 flex items-center justify-center gap-1 text-[8px] font-extrabold uppercase tracking-[0.12em] text-[var(--text-secondary)] sm:gap-1.5 sm:text-[10px] md:text-[11px]">
-          <span>{cardCount} cards</span>
-          <span>•</span>
-          <span>{tricksWon} hands</span>
-        </div>
-      </div>
+      <h4 className={clsx('rentz-panel-title', accent === 'light' && 'text-white')}>{title}</h4>
     </div>
+  );
+}
+
+function RentzSeatCluster({
+  player,
+  seatRole = 'top',
+  isCurrent = false,
+  isWinner = false,
+  cardCount = 0,
+  tricksWon = 0,
+  points = null,
+  mobileHero = false,
+  onEmojiClick
+}) {
+  const avatarSource = getPlayerAvatarSource(player);
+  const rating = getPlayerRating(player);
+  const isConnected = getPlayerPresence(player);
+
+  return (
+    <article
+      className={clsx(
+        'rentz-seat-cluster',
+        `rentz-seat-cluster-${seatRole}`,
+        mobileHero && 'rentz-seat-cluster-hero',
+        isWinner && 'is-winner',
+        isCurrent && !mobileHero && 'is-current'
+      )}
+    >
+      {isCurrent && !mobileHero && (
+        <div className="rentz-seat-turn-marker" aria-label={`${getPlayerName(player)} is the current player`} />
+      )}
+
+      <div className="rentz-seat-name">{getPlayerName(player)}</div>
+
+      <div className="rentz-avatar-wrap">
+        <button
+          type="button"
+          onClick={onEmojiClick}
+          className="rentz-emoji-button"
+          title="Emoji reactions are not wired yet"
+          aria-label={`Open emoji reaction menu for ${getPlayerName(player)}`}
+        >
+          🙂
+        </button>
+        <span
+          className={clsx('rentz-presence-dot', isConnected ? 'is-online' : 'is-offline')}
+          title={isConnected ? 'Present in room' : 'Not currently connected'}
+        />
+
+        <div className="rentz-avatar-shell">
+          {avatarSource ? (
+            <img
+              src={avatarSource}
+              alt={`${getPlayerName(player)} avatar`}
+              className="rentz-avatar-image"
+            />
+          ) : (
+            <div className="rentz-avatar-fallback">{getPlayerInitials(player)}</div>
+          )}
+
+          <div className="rentz-elo-badge">
+            <Trophy className="h-3 w-3" />
+            <span>{rating == null ? 'ELO --' : `ELO ${rating}`}</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="rentz-seat-stats">
+        <div className="rentz-seat-stat">
+          <span className="rentz-seat-stat-value">{tricksWon}</span>
+          <span className="rentz-seat-stat-label">hands</span>
+        </div>
+        <div className="rentz-seat-stat">
+          <span className="rentz-seat-stat-value">{formatMetaValue(points)}</span>
+          <span className="rentz-seat-stat-label">points</span>
+        </div>
+        <div className="rentz-seat-stat">
+          <span className="rentz-seat-stat-value">{cardCount}</span>
+          <span className="rentz-seat-stat-label">cards</span>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, points }) {
+  const rating = getPlayerRating(player);
+  const isConnected = getPlayerPresence(player);
+
+  return (
+    <div className={clsx('rentz-player-row', isCurrent && 'is-current')}>
+      <div className="rentz-player-row-avatar">{getPlayerInitials(player)}</div>
+      <div className="rentz-player-row-copy">
+        <div className="rentz-player-row-name">
+          {getPlayerName(player)} {isLocal ? '(You)' : ''}
+        </div>
+        <div className="rentz-player-row-meta">
+          <span>{rating == null ? 'ELO --' : `ELO ${rating}`}</span>
+          <span>{cardCount} cards</span>
+          <span>{tricksWon} hands</span>
+          <span>{formatMetaValue(points)} pts</span>
+        </div>
+      </div>
+      <span
+        className={clsx('rentz-player-row-presence', isConnected ? 'is-online' : 'is-offline')}
+        title={isConnected ? 'Present in room' : 'Not currently connected'}
+      />
+    </div>
+  );
+}
+
+function TrickBoard({ currentTrick, playerCount, trickSuit, trickPending }) {
+  const slotCount = Math.max(4, Math.min(6, playerCount || 4));
+
+  return (
+    <section className={clsx('rentz-trick-board', trickPending && 'is-pending')}>
+      <div className="rentz-trick-board-heading">
+        <span>Central trick board</span>
+        <span>{trickSuit ? `Lead ${SUIT_NAMES[trickSuit]}` : 'Waiting for lead card'}</span>
+      </div>
+
+      <div className={clsx('rentz-trick-grid', slotCount > 4 && 'has-six-slots')}>
+        {Array.from({ length: slotCount }).map((_, index) => {
+          const play = currentTrick[index];
+
+          return (
+            <div key={`trick-slot-${index}`} className={clsx('rentz-trick-slot', play && 'is-filled')}>
+              {play ? (
+                <>
+                  <Card cardString={play.card} compact disabled />
+                  <span className="rentz-trick-slot-name">{play.playerName}</span>
+                </>
+              ) : (
+                <div className="rentz-trick-placeholder">
+                  <span className="rentz-trick-placeholder-card" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        <span className="rentz-trick-arrow arrow-one" aria-hidden="true">→</span>
+        <span className="rentz-trick-arrow arrow-two" aria-hidden="true">↓</span>
+        <span className="rentz-trick-arrow arrow-three" aria-hidden="true">←</span>
+        <span className="rentz-trick-arrow arrow-four" aria-hidden="true">↑</span>
+      </div>
+    </section>
   );
 }
 
@@ -774,9 +943,6 @@ function App() {
   const myPlayerId = players[myIndex]?.userId || activeProfile?.userId;
   const myPlayer = players[myIndex];
   const opponents = players.filter((_, index) => index !== myIndex);
-  const trickWinnerRole = trickWinnerId
-    ? getSeatRoleForPlayer(trickWinnerId, myPlayerId, opponents)
-    : null;
   const amIHost = inLobby && players.length > 0 && players[0]?.socketId === socket.id;
   const amIReady = inLobby && !!players.find((player) => player.socketId === socket.id)?.isReady;
   const isMyTurn = gameStarted && !gameFinished && myIndex === turnIndex;
@@ -809,6 +975,32 @@ function App() {
         : nextTurnPlayer
           ? `${getPlayerName(nextTurnPlayer)} is choosing a card.`
           : 'Waiting for players to join the room.';
+  const localTablePlayer = myPlayer || players.find((player) => player.userId === myPlayerId) || activeProfile;
+  const totalHandsTaken = Object.values(collectedHandsByPlayer).reduce((sum, tricks) => sum + tricks.length, 0);
+  const sortedHand = sortCards(hand);
+  const playersForMobilePanel = [...players].sort((left, right) => {
+    if (left.userId === nextTurnPlayer?.userId) {
+      return -1;
+    }
+
+    if (right.userId === nextTurnPlayer?.userId) {
+      return 1;
+    }
+
+    if (left.userId === myPlayerId) {
+      return -1;
+    }
+
+    if (right.userId === myPlayerId) {
+      return 1;
+    }
+
+    return getPlayerName(left).localeCompare(getPlayerName(right));
+  });
+
+  const handleEmojiPrompt = (player) => {
+    showTopPrompt(`Emoji reactions are not wired yet for ${getPlayerName(player)}.`, 'info');
+  };
 
   const renderLobbyView = () => (
     <div className="relative z-10 w-full max-w-4xl">
@@ -942,179 +1134,212 @@ function App() {
     </div>
   );
 
-  const renderGameTable = () => (
-    <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-3 sm:gap-4">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="seat-chip flex min-w-0 items-start gap-3 px-3 py-3 sm:items-center sm:px-4">
-          <Info className="h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
-          <div>
-            <span className="mr-1 font-display text-lg font-black text-[var(--seat-chip-text)] sm:text-xl">Notice:</span>
-            <span className="text-sm font-semibold leading-6 text-[var(--text-secondary)] sm:text-base">{noticeText}</span>
-          </div>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="status-pill px-3 py-2">
-            Room {roomId}
-          </div>
-          <div className={clsx('status-pill px-3 py-2', isMyTurn && 'bg-[var(--accent-glow)] text-white')}>
-            {isMyTurn ? 'Your turn' : `${getPlayerName(nextTurnPlayer)}'s turn`}
-          </div>
-        </div>
-      </div>
-
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="inline-flex w-full max-w-full overflow-x-auto rounded-full border border-[var(--glass-border)] bg-[var(--surface-soft)] p-1 shadow-sm sm:w-auto">
-          {[
-            { id: 'table', label: 'Table' },
-            { id: 'collected', label: 'Collected Hands' }
-          ].map((view) => (
-            <button
-              key={view.id}
-              onClick={() => setPlayView(view.id)}
-              className={clsx(
-                'whitespace-nowrap rounded-full px-4 py-2 text-sm font-black uppercase tracking-[0.16em] transition-all',
-                playView === view.id ? 'frutiger-button' : 'text-[var(--text-secondary)]'
-              )}
-            >
-              {view.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="status-pill px-3 py-2">{players.length} players</div>
-          <div className="status-pill px-3 py-2">
-            {Object.values(collectedHandsByPlayer).reduce((sum, tricks) => sum + tricks.length, 0)} hands taken
-          </div>
-        </div>
-      </div>
-
-      {playView === 'collected' ? (
-        <CollectedHandsView
-          players={players}
-          collectedHandsByPlayer={collectedHandsByPlayer}
-          myPlayerId={myPlayerId}
-        />
-      ) : (
-        <>
-          <div className="table-felt relative min-h-[31rem] flex-1 overflow-hidden rounded-[1.7rem] p-2.5 pb-[11.5rem] sm:min-h-[34rem] sm:rounded-[2.2rem] sm:p-3 sm:pb-[12.5rem] md:min-h-[calc(100vh-15rem)] md:p-4 lg:min-h-[calc(100vh-15.5rem)] lg:p-5">
-            <div className="absolute left-3 top-3 z-30 hidden flex-wrap gap-2 sm:flex md:left-4 md:top-4">
-              <div className="status-pill px-3 py-2">Room {roomId}</div>
-              <div className={clsx('status-pill px-3 py-2', isMyTurn && 'bg-[var(--accent-glow)] text-white')}>
-                {isMyTurn ? 'Your turn' : `${getPlayerName(nextTurnPlayer)}'s turn`}
+  const renderGameTable = () => {
+    if (gameFinished && playView === 'stats') {
+      return (
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4">
+          <div className="rentz-status-strip">
+            <div className="rentz-notice-banner">
+              <Info className="h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
+              <div>
+                <span className="rentz-notice-label">Notice:</span>
+                <span className="rentz-notice-copy">{noticeText}</span>
               </div>
             </div>
+          </div>
 
-            <div className="absolute right-4 top-4 z-30 hidden w-52 xl:block">
-              <div className="glass-panel p-3">
-                <div className="mb-2 flex items-center gap-2">
-                  <Trophy className="h-4 w-4 text-[var(--text-secondary)]" />
-                  <h4 className="text-sm font-display font-black text-[var(--text-primary)]">Round Feed</h4>
+          <section className="glass-panel p-4 sm:p-5">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <Trophy className="h-5 w-5 text-[var(--text-secondary)]" />
+                <div>
+                  <h4 className="text-xl font-display font-black text-[var(--text-primary)] sm:text-2xl">Game Finished</h4>
+                  <p className="text-sm font-semibold text-[var(--text-secondary)]">
+                    Final standings for room {roomId}
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  {activityFeed.length === 0 ? (
-                    <p className="text-xs font-semibold text-[var(--text-secondary)]">
-                      Hand winners appear here.
-                    </p>
-                  ) : (
-                    activityFeed.map((item, index) => (
-                      <div key={`${item}-${index}`} className="rounded-2xl border border-[var(--glass-border)] bg-[var(--surface-subtle)] px-3 py-2 text-xs font-bold text-[var(--text-primary)]">
-                        {item}
-                      </div>
-                    ))
+              </div>
+              <button
+                onClick={() => setPlayView('table')}
+                className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:bg-[var(--surface-hover)]"
+              >
+                Back to Lobby
+              </button>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {finalStandings.map((standing, index) => (
+                <div
+                  key={standing.userId}
+                  className={clsx(
+                    'rounded-[1.5rem] border px-4 py-4 text-sm font-bold',
+                    index === 0
+                      ? 'border-lime-200/80 bg-lime-100/20 text-[var(--text-primary)]'
+                      : 'border-[var(--glass-border)] bg-[var(--surface-subtle)] text-[var(--text-primary)]'
                   )}
+                >
+                  <div className="text-[10px] font-extrabold uppercase tracking-[0.18em]">
+                    {index === 0 ? 'Winner' : `Place ${index + 1}`}
+                  </div>
+                  <div className="mt-1 text-lg font-black">{standing.name}</div>
+                  <div className="mt-2 text-sm text-[var(--text-secondary)]">{standing.tricksWon} hands collected</div>
+                  <div className="mt-1 text-sm text-[var(--text-secondary)]">{standing.cardsLeft} cards left</div>
                 </div>
+              ))}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    if (playView === 'collected') {
+      return (
+        <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4">
+          <div className="rentz-status-strip">
+            <div className="rentz-notice-banner">
+              <Info className="h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
+              <div>
+                <span className="rentz-notice-label">Notice:</span>
+                <span className="rentz-notice-copy">{noticeText}</span>
               </div>
             </div>
+            <div className="rentz-status-pills">
+              <div className="status-pill px-3 py-2">Room {roomId}</div>
+              <div className="status-pill px-3 py-2">{totalHandsTaken} hands taken</div>
+            </div>
+          </div>
 
-            {opponents.map((player, index) => (
-              <OpponentSeat
-                key={player.userId || player.socketId || index}
-                player={player}
-                positionClass={OPPONENT_LAYOUTS[index] || OPPONENT_LAYOUTS[0]}
-                isTurn={players[turnIndex]?.userId === player.userId}
-                cardCount={cardCounts[player.userId] || 0}
-                tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
-                isWinner={trickWinnerId === player.userId}
+          <section className="glass-panel p-4 sm:p-5">
+            <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h4 className="text-xl font-display font-black text-[var(--text-primary)] sm:text-2xl">Collected Hands</h4>
+                <p className="text-sm font-semibold text-[var(--text-secondary)]">
+                  This is the existing taken-hands view, remapped from the new table action area.
+                </p>
+              </div>
+              <button
+                onClick={() => setPlayView('table')}
+                className="frutiger-button px-5 py-3 text-sm font-black uppercase tracking-[0.16em]"
+              >
+                Înapoi la masă
+              </button>
+            </div>
+
+            <CollectedHandsView
+              players={players}
+              collectedHandsByPlayer={collectedHandsByPlayer}
+              myPlayerId={myPlayerId}
+            />
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4">
+        <div className="rentz-status-strip">
+          <div className="rentz-notice-banner">
+            <Info className="h-5 w-5 shrink-0 text-[var(--text-secondary)]" />
+            <div>
+              <span className="rentz-notice-label">Notice:</span>
+              <span className="rentz-notice-copy">{noticeText}</span>
+            </div>
+          </div>
+
+          <div className="rentz-status-pills">
+            <div className="status-pill px-3 py-2">Room {roomId}</div>
+            <div className={clsx('status-pill px-3 py-2', isMyTurn && 'bg-[var(--accent-glow)] text-white')}>
+              {isMyTurn ? 'Your turn' : `${getPlayerName(nextTurnPlayer)}'s turn`}
+            </div>
+            <div className="status-pill px-3 py-2">{players.length} players</div>
+          </div>
+        </div>
+
+        <section className="rentz-game-frame">
+          <div className="rentz-table-stage table-felt">
+            <div className="rentz-marking-box">Marking suit: {formatMarkingSuit(trickSuit)}</div>
+
+            <div className="rentz-table-corner-pills">
+              <div className="status-pill px-3 py-2">{totalHandsTaken} hands taken</div>
+            </div>
+
+            <div className="rentz-table-brand">Rentz</div>
+
+            <div className="rentz-mobile-hero">
+              <div className="rentz-current-player-label">Current player:</div>
+              {nextTurnPlayer ? (
+                <RentzSeatCluster
+                  player={nextTurnPlayer}
+                  seatRole="hero"
+                  mobileHero
+                  isCurrent
+                  isWinner={trickWinnerId === nextTurnPlayer.userId}
+                  cardCount={nextTurnPlayer.userId === myPlayerId ? hand.length : (cardCounts[nextTurnPlayer.userId] || 0)}
+                  tricksWon={(collectedHandsByPlayer[nextTurnPlayer.userId] || []).length}
+                  points={getPlayerPoints(nextTurnPlayer)}
+                  onEmojiClick={() => handleEmojiPrompt(nextTurnPlayer)}
+                />
+              ) : null}
+            </div>
+
+            <div className="rentz-desktop-seats">
+              {opponents.map((player, index) => {
+                const seatRole = OPPONENT_SEAT_ROLES[index] || 'top';
+
+                return (
+                  <RentzSeatCluster
+                    key={player.userId || player.socketId || index}
+                    player={player}
+                    seatRole={seatRole}
+                    isCurrent={nextTurnPlayer?.userId === player.userId}
+                    isWinner={trickWinnerId === player.userId}
+                    cardCount={cardCounts[player.userId] || 0}
+                    tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
+                    points={getPlayerPoints(player)}
+                    onEmojiClick={() => handleEmojiPrompt(player)}
+                  />
+                );
+              })}
+
+              {localTablePlayer ? (
+                <RentzSeatCluster
+                  player={localTablePlayer}
+                  seatRole="bottom"
+                  isCurrent={nextTurnPlayer?.userId === myPlayerId}
+                  isWinner={trickWinnerId === myPlayerId}
+                  cardCount={hand.length}
+                  tricksWon={(collectedHandsByPlayer[myPlayerId] || []).length}
+                  points={getPlayerPoints(localTablePlayer)}
+                  onEmojiClick={() => handleEmojiPrompt(localTablePlayer)}
+                />
+              ) : null}
+            </div>
+
+            <div className="rentz-board-area">
+              <TrickBoard
+                currentTrick={currentTrick}
+                playerCount={players.length}
+                trickSuit={trickSuit}
+                trickPending={trickPending || Boolean(animatingWinner)}
               />
-            ))}
-
-            <div className="absolute left-1/2 top-[43%] z-30 flex w-[min(100%-1.25rem,24rem)] -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2.5 sm:w-auto sm:gap-3 md:top-[42%]">
-              <div className="seat-chip px-4 py-2 text-center">
-                <div className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-[var(--text-secondary)] sm:text-xs">
-                  Trick center
-                </div>
-                <div className="mt-1 text-sm font-black text-[var(--seat-chip-text)] sm:text-base md:text-lg">
-                  {trickSuit ? `Lead suit: ${SUIT_NAMES[trickSuit]}` : 'Waiting for lead card'}
-                </div>
-              </div>
-
-              <div className="relative flex min-h-[8.25rem] min-w-[10.5rem] items-center justify-center sm:min-h-[10rem] sm:min-w-[12rem] md:min-h-[12rem] md:min-w-[15rem]">
-                {currentTrick.length === 0 && !animatingWinner ? (
-                  <div className="rounded-[2rem] border border-dashed border-[var(--table-label-border)] bg-[var(--surface-table-ghost)] px-4 py-5 text-center text-xs font-display font-black uppercase tracking-[0.16em] text-[var(--table-empty-text)] sm:px-6 sm:py-7 sm:text-sm md:px-8 md:py-9 md:text-base">
-                    Played cards appear here
-                  </div>
-                ) : (
-                  currentTrick.map((play, index) => (
-                    (() => {
-                      const baseX = (index - (currentTrick.length - 1) / 2) * 3.1;
-                      const baseY = Math.abs(index - (currentTrick.length - 1) / 2) * 0.45;
-                      const baseRotate = (index - (currentTrick.length - 1) / 2) * 8;
-                      const collectionOffset = getCollectionOffset(trickWinnerRole);
-                      const transform = animatingWinner && trickWinnerRole
-                        ? `translate(${baseX + collectionOffset.x / 16}rem, ${baseY + collectionOffset.y / 16}rem) rotate(${baseRotate + collectionOffset.rotate}deg) scale(0.34)`
-                        : `translate(${baseX}rem, ${baseY}rem) rotate(${baseRotate}deg)`;
-
-                      return (
-                        <div
-                          key={`${play.playedBy}-${index}`}
-                          className="absolute flex flex-col items-center gap-2 transition-all duration-[1100ms] ease-[cubic-bezier(0.22,1,0.36,1)]"
-                          style={{
-                            transform,
-                            opacity: animatingWinner ? 0.12 : 1,
-                            filter: animatingWinner ? 'blur(1px)' : 'none'
-                          }}
-                        >
-                          <span className={clsx(
-                            'rounded-full border border-[var(--table-label-border)] bg-[var(--table-label-bg)] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-[var(--table-label-text)] backdrop-blur-md transition-all duration-500 sm:px-3 sm:text-xs sm:tracking-[0.14em]',
-                            animatingWinner && 'scale-90 opacity-0'
-                          )}>
-                            {play.playerName}
-                          </span>
-                          <Card cardString={play.card} disabled />
-                        </div>
-                      );
-                    })()
-                  ))
-                )}
-              </div>
             </div>
+          </div>
 
-            <div className="absolute bottom-2 left-1/2 z-20 flex w-[calc(100%-0.5rem)] max-w-5xl -translate-x-1/2 flex-col items-center gap-2 sm:bottom-3 sm:w-[calc(100%-1rem)] sm:gap-2.5 md:bottom-4">
-              <div className={clsx(
-                'player-seat-summary seat-chip flex w-full max-w-4xl flex-col items-start gap-3 bg-[var(--button-bg)] px-3 py-3 text-[var(--nav-active-text)] transition-all duration-500 sm:flex-row sm:items-center sm:justify-between sm:px-4 sm:py-2.5',
-                trickWinnerId === myPlayerId && 'seat-chip-winner'
-              )}>
-                <div className="flex items-center gap-3">
-                  <div className={clsx('seat-avatar h-12 w-12 text-sm', trickWinnerId === myPlayerId && 'seat-avatar-winner')}>
-                    {getPlayerName(myPlayer).charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <div className="text-base font-black sm:text-lg md:text-xl">{getPlayerName(myPlayer)} (You)</div>
-                    <div className="text-[10px] font-extrabold uppercase tracking-[0.16em] opacity-80 md:text-xs">
-                      {(collectedHandsByPlayer[myPlayerId] || []).length} collected hands
-                    </div>
+          <div className="rentz-bottom-strip">
+            <section className="rentz-hand-panel">
+              <div className="rentz-hand-header">
+                <div>
+                  <div className="rentz-hand-title">Your hand</div>
+                  <div className="rentz-hand-subtitle">
+                    {localTablePlayer ? `${getPlayerName(localTablePlayer)} (You)` : 'Local player'}
                   </div>
                 </div>
-                <div className="status-pill bg-[var(--surface-soft)] px-4 py-2 text-white">
-                  {cardCounts[myPlayerId] || hand.length} cards left
-                </div>
+                <div className="rentz-hand-count">{hand.length} cards</div>
               </div>
 
-              <div className="w-full max-w-5xl overflow-x-auto px-1 pb-1 sm:px-2 sm:pb-2">
-                <div className="mx-auto flex min-w-max items-end justify-center gap-0.5 pt-2 sm:gap-2 md:gap-0 md:pt-4">
-                  {sortCards(hand).map((card, index) => {
+              <div className="rentz-hand-scroll">
+                <div className="rentz-hand-row">
+                  {sortedHand.map((card, index) => {
                     const playable = playableCards[card];
                     const disabled = !playable;
                     const mustFollowSuit = isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
@@ -1123,9 +1348,8 @@ function App() {
                       <div
                         key={`${card}-${index}`}
                         className={clsx(
-                          'relative transition-transform duration-300',
-                          index > 0 && '-ml-5 sm:-ml-3 md:-ml-8 lg:-ml-9',
-                          playable ? 'hover:z-30 hover:-translate-y-5' : 'z-10'
+                          'rentz-hand-card-wrap',
+                          playable && 'is-playable'
                         )}
                         style={{ zIndex: index + 1 }}
                       >
@@ -1139,64 +1363,75 @@ function App() {
                       </div>
                     );
                   })}
+
                   {hand.length === 0 && (
-                    <div className="seat-chip px-6 py-5 text-center text-base font-display font-black text-[var(--text-primary)] sm:text-lg">
-                      Waiting for the next hand...
-                    </div>
+                    <div className="rentz-empty-hand">Waiting for the next hand...</div>
                   )}
                 </div>
               </div>
-            </div>
-          </div>
+            </section>
 
-          <div className="xl:hidden">
-            <div className="glass-panel p-3">
-              <div className="mb-2 flex items-center gap-2">
-                <Trophy className="h-4 w-4 text-[var(--text-secondary)]" />
-                <h4 className="text-sm font-display font-black text-[var(--text-primary)]">Round Feed</h4>
-              </div>
-              <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setPlayView('collected')}
+              className="rentz-verify-button"
+            >
+              <span>Verifică mâinile luate</span>
+            </button>
+
+            <section className="rentz-log-panel rentz-log-panel-desktop">
+              <ChromePanelHeader title="Log" />
+              <div className="rentz-log-list">
                 {activityFeed.length === 0 ? (
-                  <p className="text-xs font-semibold text-[var(--text-secondary)]">
-                    Hand winners appear here.
-                  </p>
+                  <div className="rentz-log-entry is-empty">Hand winners appear here.</div>
                 ) : (
                   activityFeed.map((item, index) => (
-                    <div key={`${item}-${index}`} className="rounded-2xl border border-[var(--glass-border)] bg-[var(--surface-subtle)] px-3 py-2 text-xs font-bold text-[var(--text-primary)]">
+                    <div key={`${item}-${index}`} className="rentz-log-entry">
                       {item}
                     </div>
                   ))
                 )}
               </div>
-            </div>
+            </section>
           </div>
 
-          {gameFinished && (
-            <div className="glass-panel p-4">
-              <div className="mb-3 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <Trophy className="h-5 w-5 text-[var(--text-secondary)]" />
-                  <h4 className="text-lg font-display font-black text-[var(--text-primary)]">Game Finished</h4>
-                </div>
-                <button onClick={() => setPlayView('table')} className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] transition hover:bg-[var(--surface-hover)]">
-                  Back to Lobby
-                </button>
-              </div>
-              <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-                {finalStandings.map((standing, index) => (
-                  <div key={standing.userId} className={clsx('rounded-2xl border px-4 py-3 text-sm font-bold', index === 0 ? 'border-lime-200/80 bg-lime-100/20 text-[var(--text-primary)]' : 'border-[var(--glass-border)] bg-[var(--surface-subtle)] text-[var(--text-primary)]')}>
-                    <div className="text-[10px] font-extrabold uppercase tracking-[0.18em]">{index === 0 ? 'Winner' : `Place ${index + 1}`}</div>
-                    <div className="mt-1 text-base font-black">{standing.name}</div>
-                    <div className="mt-1">{standing.tricksWon} hands collected</div>
-                  </div>
+          <div className="rentz-mobile-panels">
+            <section className="rentz-players-panel">
+              <ChromePanelHeader title="Players" />
+              <div className="rentz-player-list">
+                {playersForMobilePanel.map((player, index) => (
+                  <CompactPlayerRow
+                    key={player.userId || player.socketId || index}
+                    player={player}
+                    isCurrent={nextTurnPlayer?.userId === player.userId}
+                    isLocal={player.userId === myPlayerId}
+                    cardCount={player.userId === myPlayerId ? hand.length : (cardCounts[player.userId] || 0)}
+                    tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
+                    points={getPlayerPoints(player)}
+                  />
                 ))}
               </div>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
+            </section>
+
+            <section className="rentz-log-panel rentz-log-panel-mobile">
+              <ChromePanelHeader title="Log" />
+              <div className="rentz-log-list">
+                {activityFeed.length === 0 ? (
+                  <div className="rentz-log-entry is-empty">Hand winners appear here.</div>
+                ) : (
+                  activityFeed.map((item, index) => (
+                    <div key={`${item}-${index}`} className="rentz-log-entry">
+                      {item}
+                    </div>
+                  ))
+                )}
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+    );
+  };
 
   const renderPlayContent = () => {
     if (!activeProfile) {

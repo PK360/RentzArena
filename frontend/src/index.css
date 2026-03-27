@@ -585,4 +585,1040 @@
       0 0 0 1px rgba(255,255,255,0.45),
       0 16px 30px rgba(84,181,58,0.35);
   }
+
+  .rentz-status-strip {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 0.8rem;
+  }
+
+  .rentz-notice-banner {
+    display: flex;
+    min-width: min(100%, 20rem);
+    flex: 1 1 22rem;
+    gap: 0.8rem;
+    border: 1px solid rgba(255,255,255,0.7);
+    border-radius: 1.35rem;
+    background: linear-gradient(180deg, rgba(243,251,255,0.92) 0%, rgba(214,237,255,0.72) 100%);
+    box-shadow:
+      inset 0 2px 4px rgba(255,255,255,0.92),
+      0 14px 28px rgba(0,0,0,0.08);
+    padding: 0.9rem 1rem;
+  }
+
+  .rentz-notice-label {
+    margin-right: 0.4rem;
+    font-family: "Outfit", "Trebuchet MS", sans-serif;
+    font-size: 1.05rem;
+    font-weight: 900;
+    color: var(--text-primary);
+  }
+
+  .rentz-notice-copy {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    font-weight: 700;
+    line-height: 1.55;
+  }
+
+  .rentz-status-pills {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.55rem;
+  }
+
+  .rentz-game-frame {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.75rem;
+    border: 3px solid rgba(16, 24, 38, 0.8);
+    border-radius: 1.8rem;
+    background:
+      linear-gradient(180deg, rgba(253,255,255,0.96) 0%, rgba(231,238,244,0.88) 100%);
+    box-shadow:
+      0 30px 60px rgba(0,0,0,0.16),
+      inset 0 1px 0 rgba(255,255,255,0.95);
+    padding: 0.7rem;
+  }
+
+  .rentz-table-stage {
+    position: relative;
+    min-height: 40rem;
+    overflow: hidden;
+    border: 3px solid rgba(13, 35, 17, 0.85);
+    border-radius: 1.3rem;
+    padding: 1rem;
+  }
+
+  .rentz-marking-box {
+    position: absolute;
+    left: 1rem;
+    top: 1rem;
+    z-index: 20;
+    border: 2px solid rgba(77, 19, 12, 0.78);
+    border-radius: 0.8rem;
+    background: linear-gradient(180deg, rgba(13,30,13,0.88) 0%, rgba(5,14,7,0.82) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.18),
+      0 14px 24px rgba(0,0,0,0.18);
+    color: #ff6457;
+    font-size: 0.88rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    padding: 0.55rem 0.8rem;
+    text-transform: uppercase;
+  }
+
+  .rentz-table-corner-pills {
+    position: absolute;
+    right: 1rem;
+    top: 1rem;
+    z-index: 20;
+    display: flex;
+    gap: 0.5rem;
+  }
+
+  .rentz-table-brand {
+    position: absolute;
+    left: 1.15rem;
+    bottom: 1rem;
+    z-index: 12;
+    color: #d67e2d;
+    font-family: "Segoe Print", "Comic Sans MS", "Bradley Hand", cursive;
+    font-size: clamp(2.1rem, 4.4vw, 3.9rem);
+    font-style: italic;
+    font-weight: 900;
+    letter-spacing: -0.06em;
+    line-height: 0.95;
+    text-shadow:
+      -1px -1px 0 #4f220d,
+      1px -1px 0 #4f220d,
+      -1px 1px 0 #4f220d,
+      1px 1px 0 #4f220d,
+      0 6px 10px rgba(0,0,0,0.25);
+    transform: rotate(-3deg);
+  }
+
+  .rentz-desktop-seats {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+  }
+
+  .rentz-mobile-hero {
+    display: none;
+  }
+
+  .rentz-current-player-label {
+    color: #d28b3d;
+    font-family: "Segoe Print", "Comic Sans MS", "Bradley Hand", cursive;
+    font-size: clamp(1.45rem, 4vw, 2.25rem);
+    font-style: italic;
+    font-weight: 900;
+    line-height: 0.95;
+    margin-bottom: 0.55rem;
+    text-align: center;
+    text-shadow:
+      -1px -1px 0 #4f220d,
+      1px -1px 0 #4f220d,
+      -1px 1px 0 #4f220d,
+      1px 1px 0 #4f220d,
+      0 5px 10px rgba(0,0,0,0.24);
+    transform: rotate(-2deg);
+  }
+
+  .rentz-seat-cluster {
+    position: absolute;
+    z-index: 9;
+    display: flex;
+    width: clamp(7rem, 12vw, 9.75rem);
+    flex-direction: column;
+    align-items: center;
+    gap: 0.3rem;
+  }
+
+  .rentz-seat-cluster-top {
+    left: 50%;
+    top: 4.2rem;
+    transform: translateX(-50%);
+  }
+
+  .rentz-seat-cluster-top-left {
+    left: 11%;
+    top: 15%;
+  }
+
+  .rentz-seat-cluster-top-right {
+    right: 11%;
+    top: 15%;
+  }
+
+  .rentz-seat-cluster-left {
+    left: 3%;
+    top: 48%;
+    transform: translateY(-50%);
+  }
+
+  .rentz-seat-cluster-right {
+    right: 3%;
+    top: 48%;
+    transform: translateY(-50%);
+  }
+
+  .rentz-seat-cluster-bottom {
+    bottom: 2.25rem;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .rentz-seat-cluster-hero {
+    position: relative;
+    width: min(100%, 14rem);
+    margin-inline: auto;
+    transform: none;
+  }
+
+  .rentz-seat-name {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #7dd2ff;
+    font-size: clamp(0.72rem, 1vw, 0.95rem);
+    font-weight: 900;
+    letter-spacing: 0.02em;
+    text-align: center;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.28);
+  }
+
+  .rentz-seat-turn-marker {
+    position: absolute;
+    left: -0.95rem;
+    top: 48%;
+    transform: translateY(-50%);
+    width: 0;
+    height: 0;
+    border-top: 0.65rem solid transparent;
+    border-bottom: 0.65rem solid transparent;
+    border-right: 0.95rem solid #f6aa32;
+    filter: drop-shadow(0 3px 4px rgba(0,0,0,0.35));
+  }
+
+  .rentz-avatar-wrap {
+    position: relative;
+    padding-top: 0.15rem;
+  }
+
+  .rentz-avatar-shell {
+    position: relative;
+    display: flex;
+    height: clamp(4.9rem, 8vw, 6.7rem);
+    width: clamp(4.9rem, 8vw, 6.7rem);
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 3px solid rgba(15, 17, 27, 0.92);
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 32% 24%, rgba(255,255,255,0.75) 0%, rgba(255,255,255,0.08) 28%, transparent 42%),
+      radial-gradient(circle at 70% 78%, rgba(255,255,255,0.18) 0%, transparent 38%),
+      linear-gradient(135deg, rgba(101,161,255,0.92) 0%, rgba(103,67,204,0.78) 56%, rgba(255,161,67,0.74) 100%);
+    box-shadow:
+      inset 0 2px 5px rgba(255,255,255,0.7),
+      0 12px 24px rgba(0,0,0,0.24),
+      0 0 0 4px rgba(255,255,255,0.12);
+  }
+
+  .rentz-avatar-image,
+  .rentz-avatar-fallback {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+  }
+
+  .rentz-avatar-image {
+    object-fit: cover;
+  }
+
+  .rentz-avatar-fallback {
+    color: white;
+    font-size: clamp(1.25rem, 2.5vw, 2rem);
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-shadow: 0 3px 10px rgba(0,0,0,0.42);
+  }
+
+  .rentz-emoji-button,
+  .rentz-presence-dot {
+    position: absolute;
+    top: 0.15rem;
+    z-index: 2;
+    height: 1.45rem;
+    width: 1.45rem;
+    border-radius: 999px;
+  }
+
+  .rentz-emoji-button {
+    left: -0.2rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid rgba(18,17,18,0.8);
+    background: linear-gradient(180deg, rgba(255,250,181,0.98) 0%, rgba(249,177,56,0.96) 100%);
+    box-shadow:
+      inset 0 1px 2px rgba(255,255,255,0.9),
+      0 5px 12px rgba(0,0,0,0.22);
+    font-size: 0.88rem;
+    line-height: 1;
+    transition: transform 0.2s ease, filter 0.2s ease;
+  }
+
+  .rentz-emoji-button:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+
+  .rentz-presence-dot {
+    right: -0.08rem;
+    border: 2px solid rgba(18,17,18,0.72);
+    box-shadow:
+      inset 0 1px 2px rgba(255,255,255,0.68),
+      0 5px 12px rgba(0,0,0,0.24);
+  }
+
+  .rentz-presence-dot.is-online,
+  .rentz-player-row-presence.is-online {
+    background: linear-gradient(180deg, #7cff74 0%, #31c73b 100%);
+  }
+
+  .rentz-presence-dot.is-offline,
+  .rentz-player-row-presence.is-offline {
+    background: linear-gradient(180deg, #d9dee7 0%, #8998ae 100%);
+  }
+
+  .rentz-elo-badge {
+    position: absolute;
+    left: 50%;
+    bottom: 0.5rem;
+    z-index: 2;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.28rem;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    border: 1px solid rgba(255,196,74,0.45);
+    border-radius: 0.7rem;
+    background: linear-gradient(180deg, rgba(53,36,13,0.92) 0%, rgba(21,14,6,0.92) 100%);
+    box-shadow:
+      inset 0 1px 1px rgba(255,255,255,0.16),
+      0 8px 16px rgba(0,0,0,0.2);
+    color: #ffcf4a;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    padding: 0.24rem 0.5rem;
+  }
+
+  .rentz-seat-stats {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.25rem;
+  }
+
+  .rentz-seat-stat {
+    display: flex;
+    min-height: 2rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.28);
+    border-radius: 999px;
+    background: rgba(7,28,17,0.34);
+    backdrop-filter: blur(12px);
+    box-shadow: inset 0 1px 1px rgba(255,255,255,0.2);
+    padding: 0.2rem 0.1rem;
+    text-align: center;
+  }
+
+  .rentz-seat-stat-value {
+    color: #f0dc5d;
+    font-size: 0.78rem;
+    font-weight: 900;
+    line-height: 1;
+    text-shadow: 0 2px 6px rgba(0,0,0,0.32);
+  }
+
+  .rentz-seat-stat-label {
+    color: #d3f8ff;
+    font-size: 0.5rem;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .rentz-seat-cluster.is-current .rentz-avatar-shell,
+  .rentz-seat-cluster.is-winner .rentz-avatar-shell {
+    box-shadow:
+      inset 0 2px 5px rgba(255,255,255,0.74),
+      0 0 0 8px rgba(255,221,88,0.14),
+      0 18px 30px rgba(0,0,0,0.25);
+  }
+
+  .rentz-board-area {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    z-index: 10;
+    width: min(34rem, 50vw);
+    transform: translate(-50%, -50%);
+  }
+
+  .rentz-trick-board {
+    position: relative;
+    border: 3px solid rgba(79, 57, 17, 0.88);
+    border-radius: 1.05rem;
+    background:
+      linear-gradient(180deg, rgba(184,174,96,0.95) 0%, rgba(140,125,58,0.94) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.34),
+      inset 0 0 0 1px rgba(80,64,20,0.28),
+      0 18px 30px rgba(0,0,0,0.18);
+    padding: 0.9rem;
+  }
+
+  .rentz-trick-board.is-pending {
+    filter: saturate(1.05);
+  }
+
+  .rentz-trick-board-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    color: rgba(49, 40, 12, 0.88);
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.14em;
+    margin-bottom: 0.7rem;
+    text-transform: uppercase;
+  }
+
+  .rentz-trick-grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.65rem;
+  }
+
+  .rentz-trick-grid.has-six-slots {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .rentz-trick-slot {
+    display: flex;
+    min-height: 6.1rem;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed rgba(86, 68, 20, 0.5);
+    border-radius: 0.85rem;
+    background: rgba(255,255,255,0.1);
+    padding: 0.3rem;
+    text-align: center;
+  }
+
+  .rentz-trick-slot.is-filled {
+    border-style: solid;
+    background: rgba(255,248,223,0.2);
+  }
+
+  .rentz-trick-slot-name {
+    margin-top: 0.28rem;
+    max-width: 4.2rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(42, 34, 11, 0.86);
+    font-size: 0.56rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .rentz-trick-placeholder {
+    display: flex;
+    height: 100%;
+    width: 100%;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .rentz-trick-placeholder-card {
+    display: block;
+    height: 3.8rem;
+    width: 2.65rem;
+    border: 2px dashed rgba(90,74,28,0.58);
+    border-radius: 0.7rem;
+    background: rgba(255,255,255,0.08);
+  }
+
+  .rentz-trick-arrow {
+    position: absolute;
+    z-index: 1;
+    color: rgba(52, 40, 8, 0.78);
+    font-size: 1.1rem;
+    font-weight: 900;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  .rentz-trick-arrow.arrow-one {
+    left: 50%;
+    top: 28%;
+    transform: translate(-50%, -50%);
+  }
+
+  .rentz-trick-arrow.arrow-two {
+    right: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .rentz-trick-arrow.arrow-three {
+    left: 50%;
+    bottom: 22%;
+    transform: translate(-50%, 50%);
+  }
+
+  .rentz-trick-arrow.arrow-four {
+    left: 0.35rem;
+    top: 50%;
+    transform: translateY(-50%);
+  }
+
+  .rentz-bottom-strip {
+    display: grid;
+    gap: 0.7rem;
+    grid-template-columns: minmax(0, 1.8fr) minmax(12rem, 0.9fr) minmax(18rem, 1fr);
+  }
+
+  .rentz-hand-panel,
+  .rentz-log-panel,
+  .rentz-players-panel {
+    min-width: 0;
+    border: 3px solid rgba(14, 19, 25, 0.78);
+    border-radius: 1.15rem;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.96) 0%, rgba(241,246,249,0.88) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.95),
+      0 14px 28px rgba(0,0,0,0.1);
+  }
+
+  .rentz-hand-panel {
+    padding: 0.8rem 0.9rem 0.85rem;
+  }
+
+  .rentz-hand-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.8rem;
+    margin-bottom: 0.7rem;
+  }
+
+  .rentz-hand-title {
+    color: #13232b;
+    font-size: 0.92rem;
+    font-weight: 900;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .rentz-hand-subtitle {
+    color: #5c7080;
+    font-size: 0.72rem;
+    font-weight: 700;
+    margin-top: 0.12rem;
+  }
+
+  .rentz-hand-count {
+    border: 1px solid rgba(140,163,184,0.45);
+    border-radius: 999px;
+    background: rgba(226,235,242,0.9);
+    color: #20303b;
+    font-size: 0.72rem;
+    font-weight: 900;
+    letter-spacing: 0.1em;
+    padding: 0.45rem 0.7rem;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .rentz-hand-scroll {
+    overflow-x: auto;
+    overflow-y: visible;
+    padding-bottom: 0.25rem;
+  }
+
+  .rentz-hand-row {
+    display: flex;
+    min-width: max-content;
+    align-items: flex-end;
+    gap: 0.38rem;
+    padding-top: 0.2rem;
+  }
+
+  .rentz-hand-card-wrap {
+    position: relative;
+    transition: transform 0.25s ease;
+  }
+
+  .rentz-empty-hand {
+    display: flex;
+    min-height: 6.5rem;
+    min-width: 14rem;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed rgba(122,140,153,0.5);
+    border-radius: 1rem;
+    background: rgba(245,248,251,0.8);
+    color: #546775;
+    font-family: "Outfit", "Trebuchet MS", sans-serif;
+    font-size: 1rem;
+    font-weight: 900;
+    padding: 1rem;
+    text-align: center;
+  }
+
+  .rentz-verify-button {
+    display: inline-flex;
+    min-height: 100%;
+    align-items: center;
+    justify-content: center;
+    border: 3px solid rgba(50, 55, 65, 0.72);
+    border-radius: 1.15rem;
+    background:
+      linear-gradient(180deg, rgba(207,214,223,0.96) 0%, rgba(165,171,182,0.94) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.84),
+      0 12px 24px rgba(0,0,0,0.12);
+    padding: 1rem;
+    transition: filter 0.2s ease, transform 0.2s ease;
+  }
+
+  .rentz-verify-button:hover {
+    filter: brightness(1.03) saturate(1.04);
+    transform: translateY(-1px);
+  }
+
+  .rentz-verify-button span {
+    color: #30a349;
+    font-family: "Segoe Print", "Comic Sans MS", "Bradley Hand", cursive;
+    font-size: clamp(1.15rem, 1.8vw, 1.7rem);
+    font-weight: 900;
+    line-height: 1.05;
+    max-width: 11ch;
+    text-align: center;
+    text-shadow:
+      0 1px 0 rgba(255,255,255,0.78),
+      0 3px 10px rgba(0,0,0,0.12);
+  }
+
+  .rentz-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    border-bottom: 2px solid rgba(64, 78, 92, 0.14);
+    padding: 0.7rem 0.85rem;
+  }
+
+  .rentz-panel-dots {
+    display: flex;
+    gap: 0.3rem;
+  }
+
+  .rentz-panel-dots span {
+    display: inline-block;
+    height: 0.8rem;
+    width: 0.8rem;
+    border: 1px solid rgba(0,0,0,0.16);
+    border-radius: 999px;
+    box-shadow: inset 0 1px 2px rgba(255,255,255,0.6);
+  }
+
+  .rentz-panel-dots .is-red { background: #ff5f56; }
+  .rentz-panel-dots .is-yellow { background: #ffbd2e; }
+  .rentz-panel-dots .is-green { background: #27c93f; }
+
+  .rentz-panel-title {
+    color: #1a2730;
+    font-size: 1rem;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .rentz-log-panel,
+  .rentz-players-panel {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .rentz-log-list,
+  .rentz-player-list {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.65rem;
+    overflow: auto;
+    padding: 0.75rem;
+  }
+
+  .rentz-log-list {
+    max-height: 13.5rem;
+  }
+
+  .rentz-log-entry {
+    border: 2px solid rgba(18, 18, 18, 0.75);
+    border-radius: 0.42rem;
+    background: white;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.92);
+    color: #111111;
+    font-family: "Segoe Print", "Comic Sans MS", "Bradley Hand", cursive;
+    font-size: 0.92rem;
+    line-height: 1.28;
+    padding: 0.5rem 0.65rem;
+  }
+
+  .rentz-log-entry.is-empty {
+    border-style: dashed;
+    border-color: rgba(92, 111, 124, 0.45);
+    background: rgba(246,250,252,0.86);
+    color: #5f7382;
+    font-family: "Outfit", "Trebuchet MS", sans-serif;
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+
+  .rentz-player-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0.65rem;
+    border: 2px solid rgba(16, 23, 31, 0.72);
+    border-radius: 1rem;
+    background: rgba(255,255,255,0.88);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.9),
+      0 6px 16px rgba(0,0,0,0.06);
+    padding: 0.6rem 0.7rem;
+  }
+
+  .rentz-player-row.is-current {
+    background: linear-gradient(180deg, rgba(239,252,216,0.95) 0%, rgba(216,242,255,0.95) 100%);
+  }
+
+  .rentz-player-row-avatar {
+    display: flex;
+    height: 2.95rem;
+    width: 2.95rem;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid rgba(17, 19, 26, 0.9);
+    border-radius: 999px;
+    background:
+      radial-gradient(circle at 30% 22%, rgba(255,255,255,0.78) 0%, rgba(255,255,255,0.14) 28%, transparent 40%),
+      linear-gradient(135deg, rgba(111,173,255,0.9) 0%, rgba(120,84,216,0.76) 62%, rgba(255,171,85,0.68) 100%);
+    color: white;
+    font-size: 0.95rem;
+    font-weight: 900;
+    text-shadow: 0 2px 8px rgba(0,0,0,0.35);
+  }
+
+  .rentz-player-row-copy {
+    min-width: 0;
+  }
+
+  .rentz-player-row-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #1a2934;
+    font-size: 0.96rem;
+    font-weight: 900;
+  }
+
+  .rentz-player-row-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem 0.55rem;
+    color: #5a7080;
+    font-size: 0.64rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    margin-top: 0.2rem;
+    text-transform: uppercase;
+  }
+
+  .rentz-player-row-presence {
+    height: 0.95rem;
+    width: 0.95rem;
+    border: 2px solid rgba(255,255,255,0.92);
+    border-radius: 999px;
+    box-shadow: 0 0 0 1px rgba(18,23,31,0.45);
+  }
+
+  .rentz-mobile-panels {
+    display: none;
+  }
+
+  .rentz-log-panel-mobile {
+    display: none;
+  }
+
+  @media (min-width: 1024px) {
+    .rentz-hand-card-wrap + .rentz-hand-card-wrap {
+      margin-left: -1.7rem;
+    }
+
+    .rentz-hand-card-wrap.is-playable:hover {
+      transform: translateY(-0.85rem);
+      z-index: 18;
+    }
+  }
+
+  @media (max-width: 1279px) {
+    .rentz-seat-cluster {
+      width: clamp(6.4rem, 13vw, 8.6rem);
+    }
+
+    .rentz-board-area {
+      width: min(30rem, 54vw);
+    }
+  }
+
+  @media (max-width: 1023px) {
+    .rentz-status-strip {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .rentz-status-pills {
+      justify-content: flex-start;
+    }
+
+    .rentz-game-frame {
+      border-radius: 1.45rem;
+      padding: 0.55rem;
+    }
+
+    .rentz-table-stage {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(9rem, 0.95fr);
+      grid-template-rows: auto 1fr auto;
+      align-items: start;
+      column-gap: 0.75rem;
+      min-height: 25rem;
+      padding: 0.75rem;
+    }
+
+    .rentz-desktop-seats,
+    .rentz-table-corner-pills {
+      display: none;
+    }
+
+    .rentz-mobile-hero {
+      display: flex;
+      grid-column: 2;
+      grid-row: 1 / span 2;
+      flex-direction: column;
+      align-self: start;
+      justify-self: stretch;
+      padding-top: 1.7rem;
+      z-index: 10;
+    }
+
+    .rentz-board-area {
+      position: relative;
+      left: auto;
+      top: auto;
+      width: 100%;
+      grid-column: 1;
+      grid-row: 2;
+      transform: none;
+    }
+
+    .rentz-table-brand {
+      bottom: 0.85rem;
+      left: 0.9rem;
+      font-size: clamp(1.85rem, 8vw, 2.8rem);
+    }
+
+    .rentz-marking-box {
+      left: 0.75rem;
+      top: 0.75rem;
+      font-size: 0.72rem;
+      max-width: calc(100% - 10rem);
+      padding: 0.45rem 0.6rem;
+    }
+
+    .rentz-bottom-strip {
+      grid-template-columns: 1fr;
+    }
+
+    .rentz-verify-button {
+      min-height: 5.4rem;
+    }
+
+    .rentz-log-panel-desktop {
+      display: none;
+    }
+
+    .rentz-mobile-panels {
+      display: grid;
+      gap: 0.7rem;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .rentz-log-panel-mobile {
+      display: flex;
+    }
+
+    .rentz-player-list,
+    .rentz-log-list {
+      max-height: 16rem;
+    }
+
+    .rentz-seat-cluster-hero .rentz-seat-name {
+      font-size: 0.86rem;
+    }
+
+    .rentz-seat-cluster-hero .rentz-avatar-shell {
+      height: clamp(5.5rem, 22vw, 7.3rem);
+      width: clamp(5.5rem, 22vw, 7.3rem);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .rentz-notice-banner {
+      padding: 0.8rem 0.85rem;
+    }
+
+    .rentz-notice-label {
+      display: block;
+      margin-right: 0;
+      margin-bottom: 0.1rem;
+    }
+
+    .rentz-notice-copy {
+      display: block;
+      font-size: 0.86rem;
+    }
+
+    .rentz-table-stage {
+      grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.92fr);
+      min-height: 22rem;
+      padding: 0.65rem;
+    }
+
+    .rentz-trick-board {
+      padding: 0.7rem;
+    }
+
+    .rentz-trick-grid,
+    .rentz-trick-grid.has-six-slots {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .rentz-trick-slot {
+      min-height: 5.5rem;
+    }
+
+    .rentz-trick-slot .card,
+    .rentz-trick-slot button {
+      transform: scale(0.92);
+    }
+
+    .rentz-mobile-panels {
+      gap: 0.6rem;
+    }
+
+    .rentz-player-row {
+      gap: 0.55rem;
+      padding: 0.55rem 0.6rem;
+    }
+
+    .rentz-player-row-avatar {
+      height: 2.45rem;
+      width: 2.45rem;
+      font-size: 0.82rem;
+    }
+
+    .rentz-player-row-name {
+      font-size: 0.84rem;
+    }
+
+    .rentz-player-row-meta {
+      font-size: 0.56rem;
+      gap: 0.2rem 0.38rem;
+    }
+
+    .rentz-log-entry {
+      font-size: 0.82rem;
+    }
+
+    .rentz-verify-button span {
+      font-size: 1.1rem;
+    }
+  }
+
+  @media (max-width: 480px) {
+    .rentz-table-stage {
+      grid-template-columns: minmax(0, 1fr) minmax(7.1rem, 0.84fr);
+      column-gap: 0.55rem;
+      min-height: 20rem;
+    }
+
+    .rentz-marking-box {
+      max-width: calc(100% - 8rem);
+      font-size: 0.64rem;
+      letter-spacing: 0.04em;
+    }
+
+    .rentz-current-player-label {
+      font-size: 1.25rem;
+    }
+
+    .rentz-seat-cluster-hero {
+      width: 100%;
+    }
+
+    .rentz-seat-cluster-hero .rentz-seat-stats {
+      gap: 0.18rem;
+    }
+
+    .rentz-seat-stat {
+      min-height: 1.75rem;
+    }
+
+    .rentz-seat-stat-value {
+      font-size: 0.68rem;
+    }
+
+    .rentz-seat-stat-label {
+      font-size: 0.44rem;
+    }
+  }
 }
