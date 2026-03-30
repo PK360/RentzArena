@@ -636,7 +636,7 @@
     display: flex;
     min-height: 0;
     flex-direction: column;
-    gap: 0.65rem;
+    gap: 0;
     border: 3px solid rgba(16, 24, 38, 0.8);
     border-radius: 1.8rem;
     background:
@@ -654,7 +654,10 @@
     max-height: 55vh;
     overflow: hidden;
     border: 3px solid rgba(13, 35, 17, 0.85);
+    border-bottom: none;
     border-radius: 1.3rem;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
     padding: 1rem 1.1rem 1.05rem;
   }
 
@@ -1196,7 +1199,7 @@
     min-height: var(--rentz-bottom-panel-min-height);
     flex-direction: column;
     padding: 0;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
 
   .rentz-hand-header {
@@ -1237,7 +1240,6 @@
 
   .rentz-hand-scroll {
     min-height: 10.5rem;
-    margin-top: -4rem;
     overflow-x: auto;
     overflow-y: hidden;
     padding-bottom: 0.25rem;
@@ -1524,7 +1526,6 @@
     }
 
     .rentz-hand-card-wrap.is-playable:hover {
-      transform: translateY(-0.85rem);
       z-index: 18;
     }
   }
@@ -1569,17 +1570,17 @@
     }
 
     .rentz-seat-cluster {
-      width: clamp(4.7rem, 6.7vw, 6.15rem);
+      width: clamp(5.2rem, 13rem - 6.5vw, 7.5rem);
       gap: 0.16rem;
     }
 
     .rentz-avatar-shell {
-      height: clamp(3.35rem, 4.6vw, 4.35rem);
-      width: clamp(3.35rem, 4.6vw, 4.35rem);
+      height: clamp(3.85rem, 10rem - 5vw, 5.5rem);
+      width: clamp(3.85rem, 10rem - 5vw, 5.5rem);
     }
 
     .rentz-seat-name {
-      font-size: clamp(0.6rem, 0.78vw, 0.76rem);
+      font-size: clamp(0.65rem, 1.2rem - 0.5vw, 0.85rem);
       line-height: 1.05;
     }
 
@@ -1667,17 +1668,17 @@
     }
 
     .rentz-seat-slot-bottom .rentz-seat-cluster {
-      width: clamp(4.35rem, 6.15vw, 5.65rem);
-      gap: 0.12rem;
+      width: clamp(6.5rem, 16rem - 8vw, 8.5rem);
+      gap: 0.18rem;
     }
 
     .rentz-seat-slot-bottom .rentz-avatar-shell {
-      height: clamp(3.05rem, 4.15vw, 3.95rem);
-      width: clamp(3.05rem, 4.15vw, 3.95rem);
+      height: clamp(4.5rem, 12rem - 6vw, 6rem);
+      width: clamp(4.5rem, 12rem - 6vw, 6rem);
     }
 
     .rentz-seat-slot-bottom .rentz-seat-name {
-      font-size: clamp(0.54rem, 0.7vw, 0.7rem);
+      font-size: clamp(0.7rem, 1.4rem - 0.6vw, 0.88rem);
     }
 
     .rentz-seat-slot-bottom .rentz-elo-badge {
@@ -1703,21 +1704,21 @@
     .rentz-seat-slot-top .rentz-seat-cluster,
     .rentz-seat-slot-top-left .rentz-seat-cluster,
     .rentz-seat-slot-top-right .rentz-seat-cluster {
-      width: clamp(4rem, 5.55vw, 5.2rem);
-      gap: 0.12rem;
+      width: clamp(5rem, 12rem - 6vw, 7rem);
+      gap: 0.16rem;
     }
 
     .rentz-seat-slot-top .rentz-avatar-shell,
     .rentz-seat-slot-top-left .rentz-avatar-shell,
     .rentz-seat-slot-top-right .rentz-avatar-shell {
-      height: clamp(2.95rem, 4vw, 3.75rem);
-      width: clamp(2.95rem, 4vw, 3.75rem);
+      height: clamp(3.5rem, 9rem - 4.5vw, 5rem);
+      width: clamp(3.5rem, 9rem - 4.5vw, 5rem);
     }
 
     .rentz-seat-slot-top .rentz-seat-name,
     .rentz-seat-slot-top-left .rentz-seat-name,
     .rentz-seat-slot-top-right .rentz-seat-name {
-      font-size: clamp(0.5rem, 0.62vw, 0.64rem);
+      font-size: clamp(0.6rem, 1rem - 0.3vw, 0.75rem);
     }
 
     .rentz-seat-slot-top .rentz-elo-badge,

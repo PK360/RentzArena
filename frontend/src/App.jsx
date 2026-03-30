@@ -300,7 +300,7 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
           ? 'cursor-not-allowed opacity-35 saturate-0 blur-[0.2px]'
           : disabled
             ? 'cursor-default opacity-80'
-            : 'cursor-pointer hover:-translate-y-3 hover:shadow-[0_18px_28px_-14px_rgba(0,0,0,0.38)]'
+            : 'cursor-pointer hover:shadow-[0_18px_28px_-14px_rgba(0,0,0,0.38)]'
       )}
     >
       <CardIndex value={value} suit={suit} compact={isCompactCard} />
@@ -1362,7 +1362,7 @@ function App() {
 
           <div className="rentz-bottom-strip">
             <section className="rentz-hand-panel">
-              <div className="rentz-hand-scroll mt-[-3rem] sm:mt-[-3.5rem] md:mt-[-5rem] lg:mt-[-5.5rem]">
+              <div className="rentz-hand-scroll">
                 <div className="rentz-hand-row">
                   {sortedHand.map((card, index) => {
                     const playable = playableCards[card];
