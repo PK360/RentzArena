@@ -1292,10 +1292,6 @@ function App() {
               </span>
             </div>
 
-            <div className="rentz-table-corner-pills">
-              <div className="status-pill px-3 py-2">{totalHandsTaken} hands taken</div>
-            </div>
-
             <div className="rentz-table-brand">Rentz</div>
 
             <div className="rentz-mobile-hero">
@@ -1366,17 +1362,7 @@ function App() {
 
           <div className="rentz-bottom-strip">
             <section className="rentz-hand-panel">
-              <div className="rentz-hand-header">
-                <div>
-                  <div className="rentz-hand-title">Your hand</div>
-                  <div className="rentz-hand-subtitle">
-                    {localTablePlayer ? `${getPlayerName(localTablePlayer)} (You)` : 'Local player'}
-                  </div>
-                </div>
-                <div className="rentz-hand-count">{hand.length} cards</div>
-              </div>
-
-              <div className="rentz-hand-scroll">
+              <div className="rentz-hand-scroll mt-[-3rem] sm:mt-[-3.5rem] md:mt-[-5rem] lg:mt-[-5.5rem]">
                 <div className="rentz-hand-row">
                   {sortedHand.map((card, index) => {
                     const playable = playableCards[card];
@@ -1410,13 +1396,32 @@ function App() {
               </div>
             </section>
 
-            <button
-              type="button"
-              onClick={() => setPlayView('collected')}
-              className="rentz-verify-button"
-            >
-              <span>Review taken hands</span>
-            </button>
+            <div className="flex w-full h-full flex-col justify-center items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPlayView('collected')}
+                className="rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5"
+              >
+                <span className="text-[0.85rem] sm:text-[0.95rem]">Review taken hands</span>
+              </button>
+
+              <div 
+                className="flex w-full shrink-0 items-center justify-between rounded-[1.3rem] border border-[rgba(255,255,255,0.74)] px-3 py-2 sm:px-4 sm:py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(148,163,184,0.16),0_8px_16px_rgba(0,0,0,0.1)]"
+                style={{ background: 'linear-gradient(180deg, rgba(240,245,249,0.96) 0%, rgba(208,219,230,0.92) 100%)' }}
+              >
+                <div className="flex flex-col gap-0 pr-2 sm:pr-3">
+                  <span className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-[#546775]">Room</span>
+                  <span className="text-[0.9rem] sm:text-[1rem] font-black uppercase tracking-[0.12em] text-[#1f4d68] drop-shadow-sm leading-none">{roomId}</span>
+                </div>
+                <div className="h-6 w-px bg-[#94a3b8]/40 mx-1"></div>
+                <div className="flex flex-col items-end gap-0 pl-2 sm:pl-3 min-w-0">
+                  <span className="text-[0.65rem] sm:text-[0.7rem] font-bold text-[#5c7080] truncate max-w-[80px] sm:max-w-[100px]">
+                    {localTablePlayer ? `${getPlayerName(localTablePlayer)}` : 'You'}
+                  </span>
+                  <span className="text-[0.65rem] sm:text-[0.7rem] font-black text-[#20303b]">{hand.length} cards</span>
+                </div>
+              </div>
+            </div>
 
             <section className="rentz-log-panel rentz-log-panel-desktop">
               <ChromePanelHeader title="Log" />
@@ -1963,46 +1968,23 @@ endif`}
             <div className="mt-auto border-t border-[var(--glass-border)] pt-6" />
           </aside>
 
-          <main className="relative z-10 flex h-full flex-1 flex-col overflow-y-auto overflow-x-auto p-3 pb-28 sm:p-4 sm:pb-32 md:pb-4 lg:p-5">
+          <main className="relative z-10 flex h-full flex-1 flex-col overflow-y-auto overflow-x-auto p-1 pb-16 sm:p-2 sm:pb-24 md:p-2 lg:p-2">
             <div className="subpage-viewport">
               <div className="subpage-content">
-                <header className={clsx(
-                  'flex shrink-0',
-                  isCompactGameHeader ? 'mb-2 flex-col gap-2 lg:mb-2.5 lg:flex-row lg:items-center lg:justify-between lg:gap-4' : 'mb-6 flex-col gap-3'
-                )}>
-                  <div className="min-w-0 flex flex-col gap-1.5 pt-1">
-                    <h2 className={clsx(
-                      'flex items-center gap-3 font-display font-black capitalize leading-[1.08] tracking-tight text-[var(--text-primary)] drop-shadow-sm',
-                      isCompactGameHeader ? 'text-[1.5rem] sm:text-[1.75rem] lg:text-[2.1rem]' : 'text-[2rem] sm:text-3xl md:text-[4rem]'
-                    )}>
-                      {activeTab === 'play' && !inLobby && <Swords className="h-8 w-8 opacity-70 sm:h-10 sm:w-10" />}
-                      {activeTab}
-                    </h2>
-                    <div
-                      className={clsx('rounded-full', isCompactGameHeader ? 'h-1 w-16' : 'h-1.5 w-24')}
-                      style={{ background: 'var(--button-bg)', boxShadow: 'var(--nav-active-shadow)' }}
-                    />
-                  </div>
-
-                  {isCompactGameHeader && (
-                    <div className="flex min-w-0 flex-1 lg:justify-end">
-                      <div className="flex flex-wrap items-center gap-1.5 lg:flex-nowrap lg:justify-end">
-                        <div className="status-pill px-2.5 py-1.5 text-[0.66rem] sm:text-[0.7rem]">Room {roomId}</div>
-                        <div className={clsx('status-pill px-2.5 py-1.5 text-[0.66rem] sm:text-[0.7rem]', isMyTurn && 'bg-[var(--accent-glow)] text-white')}>
-                          Turn: {compactHeaderTurnText}
-                        </div>
-                        <div className="status-pill px-2.5 py-1.5 text-[0.66rem] sm:text-[0.7rem]">{players.length} players</div>
-                        <div className="status-pill px-2.5 py-1.5 text-[0.66rem] sm:text-[0.7rem]">{compactHeaderLeadText}</div>
-                        <div className="status-pill px-2.5 py-1.5 text-[0.66rem] sm:text-[0.7rem]">{totalHandsTaken} hands</div>
-                        {inlineStatusText ? (
-                          <div className={clsx('rentz-inline-status rentz-inline-status-header', errorMsg && 'is-error')}>
-                            {inlineStatusText}
-                          </div>
-                        ) : null}
-                      </div>
+                {!isCompactGameHeader && (
+                  <header className="mb-6 flex shrink-0 flex-col gap-3">
+                    <div className="min-w-0 flex flex-col gap-1.5 pt-1">
+                      <h2 className="flex items-center gap-3 font-display font-black capitalize leading-[1.08] tracking-tight text-[var(--text-primary)] drop-shadow-sm text-[2rem] sm:text-3xl md:text-[4rem]">
+                        {activeTab === 'play' && !inLobby && <Swords className="h-8 w-8 opacity-70 sm:h-10 sm:w-10" />}
+                        {activeTab}
+                      </h2>
+                      <div
+                        className="h-1.5 w-24 rounded-full"
+                        style={{ background: 'var(--button-bg)', boxShadow: 'var(--nav-active-shadow)' }}
+                      />
                     </div>
-                  )}
-                </header>
+                  </header>
+                )}
 
                 {errorMsg && activeTab !== 'play' && (
                   <div className="mb-4 flex items-center gap-2 rounded-[1.5rem] bg-red-500/90 px-4 py-3 text-sm font-bold text-white shadow-lg sm:rounded-full sm:px-6">
