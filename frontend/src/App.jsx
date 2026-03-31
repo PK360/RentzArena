@@ -46,7 +46,6 @@ const STORAGE_KEYS = {
 };
 const FONT_SCALE_RANGE = { min: 70, max: 130, step: 5, defaultValue: 100 };
 const PAGE_ZOOM_RANGE = { min: 100, max: 125, step: 5, defaultValue: 100 };
-const OPPONENT_SEAT_ROLES = ['top', 'left', 'right', 'top-left', 'top-right'];
 
 function createStepValues(min, max, step) {
   const values = [];
@@ -62,6 +61,10 @@ function getStepAlignedMidpoint(min, max, step) {
   const midpoint = (min + max) / 2;
   const steppedMidpoint = Math.round((midpoint - min) / step) * step + min;
   return Math.min(max, Math.max(min, steppedMidpoint));
+}
+
+function clampNumber(value, min, max) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function readStoredPreference(key, fallback, allowedValues) {
@@ -185,6 +188,79 @@ function canPlayCard({ card, hand, trickSuit, isMyTurn, trickPending }) {
   }
 
   return !hand.some((handCard) => parseCard(handCard).suit === trickSuit);
+}
+
+function getDesktopSeatOrder(players, myIndex) {
+  if (!players.length) {
+    return [];
+  }
+
+  if (myIndex < 0 || myIndex >= players.length) {
+    return [...players];
+  }
+
+  return [...players.slice(myIndex), ...players.slice(0, myIndex)];
+}
+
+function getSeatFitRadius({ centerX, centerY, width, height, angles, padding }) {
+  return angles.reduce((closestBoundary, angle) => {
+    const horizontal = Math.cos(angle);
+    const vertical = Math.sin(angle);
+    let angleRadius = Number.POSITIVE_INFINITY;
+
+    if (horizontal > 0.001) {
+      angleRadius = Math.min(angleRadius, (width - padding.right - centerX) / horizontal);
+    } else if (horizontal < -0.001) {
+      angleRadius = Math.min(angleRadius, (centerX - padding.left) / Math.abs(horizontal));
+    }
+
+    if (vertical > 0.001) {
+      angleRadius = Math.min(angleRadius, (height - padding.bottom - centerY) / vertical);
+    } else if (vertical < -0.001) {
+      angleRadius = Math.min(angleRadius, (centerY - padding.top) / Math.abs(vertical));
+    }
+
+    return Math.min(closestBoundary, angleRadius);
+  }, Number.POSITIVE_INFINITY);
+}
+
+function buildDesktopSeatLayout({ playerCount, stageRect, boardRect }) {
+  if (!playerCount) {
+    return [];
+  }
+
+  const centerX = boardRect.left - stageRect.left + (boardRect.width / 2);
+  const centerY = boardRect.top - stageRect.top + (boardRect.height / 2);
+  const padding = {
+    left: clampNumber(stageRect.width * 0.05, 58, 96),
+    right: clampNumber(stageRect.width * 0.05, 58, 96),
+    top: clampNumber(stageRect.height * 0.1, 56, 88),
+    bottom: clampNumber(stageRect.height * 0.08, 52, 82)
+  };
+  const angles = playerCount === 1
+    ? [Math.PI / 2]
+    : Array.from({ length: playerCount }, (_, index) => (Math.PI / 2) + (index * ((Math.PI * 2) / playerCount)));
+  const fitRadius = getSeatFitRadius({
+    centerX,
+    centerY,
+    width: stageRect.width,
+    height: stageRect.height,
+    angles,
+    padding
+  });
+  const boardOuterRadius = Math.hypot(boardRect.width, boardRect.height) / 2;
+  const preferredRadius = boardOuterRadius + clampNumber(
+    Math.min(stageRect.width, stageRect.height) * 0.07,
+    42,
+    74
+  );
+  const radius = clampNumber(preferredRadius * 1.18, 0, Math.max(0, fitRadius));
+
+  return angles.map((angle) => ({
+    x: centerX + (Math.cos(angle) * radius),
+    y: centerY + (Math.sin(angle) * radius),
+    angle
+  }));
 }
 
 async function copyTextToClipboard(text) {
@@ -645,13 +721,15 @@ function App() {
   const [myIndex, setMyIndex] = useState(-1);
   const [animatingWinner, setAnimatingWinner] = useState(null);
   const [trickWinnerId, setTrickWinnerId] = useState(null);
-  const [roundWinnerName, setRoundWinnerName] = useState('');
   const [collectedHandsByPlayer, setCollectedHandsByPlayer] = useState({});
   const [activityFeed, setActivityFeed] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [finalStandings, setFinalStandings] = useState([]);
   const [topPrompts, setTopPrompts] = useState([]);
+  const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const topPromptTimeoutsRef = useRef(new Map());
+  const tableStageRef = useRef(null);
+  const boardAreaRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
   const [editorType, setEditorType] = useState('per_round');
@@ -734,7 +812,6 @@ function App() {
       setCollectedHandsByPlayer(nextCollectedHands || {});
       setCurrentTrick([]);
       setTrickWinnerId(null);
-      setRoundWinnerName('');
       setActivityFeed([]);
       setFinalStandings([]);
     });
@@ -755,7 +832,6 @@ function App() {
     socket.on('trick_won', ({ winnerName, winnerId, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts }) => {
       setAnimatingWinner(winnerName);
       setTrickWinnerId(winnerId);
-      setRoundWinnerName(winnerName);
       setTrickPending(true);
       if (nextCollectedHands) {
         setCollectedHandsByPlayer(nextCollectedHands);
@@ -788,7 +864,6 @@ function App() {
       setTrickPending(false);
       setTrickWinnerId(winnerId);
       setAnimatingWinner(null);
-      setRoundWinnerName(winnerName);
       setFinalStandings(standings || []);
       if (nextCollectedHands) {
         setCollectedHandsByPlayer(nextCollectedHands);
@@ -1006,7 +1081,6 @@ function App() {
   const activeProfile = isAuthenticated ? userProfile : guestProfile;
   const myPlayerId = players[myIndex]?.userId || activeProfile?.userId;
   const myPlayer = players[myIndex];
-  const opponents = players.filter((_, index) => index !== myIndex);
   const amIHost = inLobby && players.length > 0 && players[0]?.socketId === socket.id;
   const amIReady = inLobby && !!players.find((player) => player.socketId === socket.id)?.isReady;
   const isMyTurn = gameStarted && !gameFinished && myIndex === turnIndex;
@@ -1024,13 +1098,13 @@ function App() {
     return acc;
   }, {});
 
-  const inlineStatusText = errorMsg
-    ? errorMsg
-    : roundWinnerName
-      ? `${roundWinnerName} took the last hand.`
-      : null;
   const localTablePlayer = myPlayer || players.find((player) => player.userId === myPlayerId) || activeProfile;
-  const totalHandsTaken = Object.values(collectedHandsByPlayer).reduce((sum, tricks) => sum + tricks.length, 0);
+  const desktopSeatPlayers = players.length > 0
+    ? getDesktopSeatOrder(players, myIndex)
+    : localTablePlayer
+      ? [localTablePlayer]
+      : [];
+  const isTableStageVisible = activeTab === 'play' && inLobby && gameStarted && !gameFinished && playView === 'table';
   const sortedHand = sortCards(hand);
   const playersForMobilePanel = [...players].sort((left, right) => {
     if (left.userId === nextTurnPlayer?.userId) {
@@ -1055,15 +1129,57 @@ function App() {
   const handleEmojiPrompt = (player) => {
     showTopPrompt(`Emoji reactions are not wired yet for ${getPlayerName(player)}.`, 'info');
   };
+
+  useEffect(() => {
+    const stageElement = tableStageRef.current;
+    const boardElement = boardAreaRef.current;
+
+    if (!isTableStageVisible || !stageElement || !boardElement || desktopSeatPlayers.length === 0) {
+      setDesktopSeatLayout([]);
+      return undefined;
+    }
+
+    let frameId = 0;
+    const updateSeatLayout = () => {
+      const stageRect = stageElement.getBoundingClientRect();
+      const boardRect = boardElement.getBoundingClientRect();
+
+      if (!stageRect.width || !stageRect.height || !boardRect.width || !boardRect.height) {
+        return;
+      }
+
+      setDesktopSeatLayout(buildDesktopSeatLayout({
+        playerCount: desktopSeatPlayers.length,
+        stageRect,
+        boardRect
+      }));
+    };
+
+    const queueSeatLayoutUpdate = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateSeatLayout);
+    };
+
+    queueSeatLayoutUpdate();
+
+    const resizeObserver = typeof window.ResizeObserver === 'function'
+      ? new window.ResizeObserver(() => {
+        queueSeatLayoutUpdate();
+      })
+      : null;
+
+    resizeObserver?.observe(stageElement);
+    resizeObserver?.observe(boardElement);
+    window.addEventListener('resize', queueSeatLayoutUpdate);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', queueSeatLayoutUpdate);
+      resizeObserver?.disconnect();
+    };
+  }, [desktopSeatPlayers.length, isTableStageVisible]);
+
   const isCompactGameHeader = activeTab === 'play' && inLobby && gameStarted;
-  const compactHeaderTurnText = gameFinished && playView === 'stats'
-    ? 'Final standings'
-    : isMyTurn
-      ? 'Your turn'
-      : nextTurnPlayer
-        ? `${getPlayerName(nextTurnPlayer)}'s turn`
-        : 'Waiting';
-  const compactHeaderLeadText = trickSuit ? `Lead ${SUIT_NAMES[trickSuit]}` : 'Waiting for lead';
 
   const renderLobbyView = () => (
     <div className="relative z-10 w-full max-w-4xl">
@@ -1279,7 +1395,7 @@ function App() {
     return (
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
         <section className="rentz-game-frame flex-1 min-h-0">
-          <div className="rentz-table-stage table-felt">
+          <div ref={tableStageRef} className="rentz-table-stage table-felt">
             <div className="rentz-marking-box">
               <span className="rentz-marking-label">Marking suit:</span>
               <span
@@ -1312,20 +1428,25 @@ function App() {
             </div>
 
             <div className="rentz-desktop-seats">
-              {opponents.map((player, index) => {
-                const seatRole = OPPONENT_SEAT_ROLES[index] || 'top';
+              {desktopSeatPlayers.map((player, index) => {
+                const seatPosition = desktopSeatLayout[index];
+
+                if (!seatPosition) {
+                  return null;
+                }
 
                 return (
                   <div
                     key={player.userId || player.socketId || index}
-                    className={clsx('rentz-seat-slot', `rentz-seat-slot-${seatRole}`)}
+                    className={clsx('rentz-seat-slot', player.userId === myPlayerId && 'is-local')}
+                    style={{ left: `${seatPosition.x}px`, top: `${seatPosition.y}px` }}
                   >
                     <RentzSeatCluster
                       player={player}
-                      seatRole={seatRole}
+                      seatRole="table"
                       isCurrent={nextTurnPlayer?.userId === player.userId}
                       isWinner={trickWinnerId === player.userId}
-                      cardCount={cardCounts[player.userId] || 0}
+                      cardCount={player.userId === myPlayerId ? hand.length : (cardCounts[player.userId] || 0)}
                       tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
                       points={getPlayerPoints(player)}
                       onEmojiClick={() => handleEmojiPrompt(player)}
@@ -1333,24 +1454,9 @@ function App() {
                   </div>
                 );
               })}
-
-              {localTablePlayer ? (
-                <div className="rentz-seat-slot rentz-seat-slot-bottom">
-                  <RentzSeatCluster
-                    player={localTablePlayer}
-                    seatRole="bottom"
-                    isCurrent={nextTurnPlayer?.userId === myPlayerId}
-                    isWinner={trickWinnerId === myPlayerId}
-                    cardCount={hand.length}
-                    tricksWon={(collectedHandsByPlayer[myPlayerId] || []).length}
-                    points={getPlayerPoints(localTablePlayer)}
-                    onEmojiClick={() => handleEmojiPrompt(localTablePlayer)}
-                  />
-                </div>
-              ) : null}
             </div>
 
-            <div className="rentz-board-area">
+            <div ref={boardAreaRef} className="rentz-board-area">
               <TrickBoard
                 currentTrick={currentTrick}
                 playerCount={players.length}

@@ -1567,6 +1567,7 @@
       inset: 0;
       padding: 0;
       z-index: 13;
+      isolation: isolate;
     }
 
     .rentz-seat-cluster {
@@ -1627,6 +1628,13 @@
 
     .rentz-seat-slot {
       position: absolute;
+      margin: 0;
+      transform: translate(-50%, calc(-50% + clamp(0.38rem, 0.8vw, 0.58rem)));
+      will-change: left, top;
+    }
+
+    .rentz-seat-slot.is-local {
+      z-index: 2;
     }
 
     .rentz-seat-slot-top {
