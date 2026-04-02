@@ -37,6 +37,32 @@ const SUIT_NAMES = {
   S: 'Spades'
 };
 
+const CARD_VALUE_NAMES = {
+  A: 'Ace',
+  K: 'King',
+  Q: 'Queen',
+  J: 'Jack',
+  '10': 'Ten',
+  '9': 'Nine',
+  '8': 'Eight',
+  '7': 'Seven',
+  '6': 'Six',
+  '5': 'Five',
+  '4': 'Four',
+  '3': 'Three',
+  '2': 'Two'
+};
+
+const CARD_SERIF_FONT = '"Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif';
+const CARD_SCRIPT_FONT = '"Great Vibes", "Apple Chancery", "Snell Roundhand", "Brush Script MT", cursive';
+const FACE_CARD_VALUES = new Set(['J', 'Q', 'K']);
+const MAX_ACTIVITY_FEED_ITEMS = 60;
+const FACE_CARD_TRANSFORMS = {
+  J: 'translate(0.02em, 0.01em)',
+  Q: 'translate(0.05em, -0.01em)',
+  K: 'translate(0.04em, 0)'
+};
+
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
 const STORAGE_KEYS = {
@@ -232,10 +258,10 @@ function buildDesktopSeatLayout({ playerCount, stageRect, boardRect }) {
   const centerX = boardRect.left - stageRect.left + (boardRect.width / 2);
   const centerY = boardRect.top - stageRect.top + (boardRect.height / 2);
   const padding = {
-    left: clampNumber(stageRect.width * 0.05, 58, 96),
-    right: clampNumber(stageRect.width * 0.05, 58, 96),
-    top: clampNumber(stageRect.height * 0.1, 56, 88),
-    bottom: clampNumber(stageRect.height * 0.08, 52, 82)
+    left: clampNumber(stageRect.width * 0.08, 72, 122),
+    right: clampNumber(stageRect.width * 0.08, 72, 122),
+    top: clampNumber(stageRect.height * 0.14, 78, 122),
+    bottom: clampNumber(stageRect.height * 0.18, 96, 150)
   };
   const angles = playerCount === 1
     ? [Math.PI / 2]
@@ -250,17 +276,35 @@ function buildDesktopSeatLayout({ playerCount, stageRect, boardRect }) {
   });
   const boardOuterRadius = Math.hypot(boardRect.width, boardRect.height) / 2;
   const preferredRadius = boardOuterRadius + clampNumber(
-    Math.min(stageRect.width, stageRect.height) * 0.07,
-    42,
-    74
+    Math.min(stageRect.width, stageRect.height) * 0.055,
+    34,
+    56
   );
-  const radius = clampNumber(preferredRadius * 1.18, 0, Math.max(0, fitRadius));
+  const radius = clampNumber(preferredRadius, 0, Math.max(0, fitRadius));
 
-  return angles.map((angle) => ({
-    x: centerX + (Math.cos(angle) * radius),
-    y: centerY + (Math.sin(angle) * radius),
-    angle
-  }));
+  return angles.map((angle) => {
+    const rawX = centerX + (Math.cos(angle) * radius);
+    const rawY = centerY + (Math.sin(angle) * radius);
+    const isBottomSeat = Math.sin(angle) > 0.72;
+    const isTopSeat = Math.sin(angle) < -0.72;
+    const isSideSeat = Math.abs(Math.cos(angle)) > 0.72;
+    const seatHalfWidth = isBottomSeat
+      ? clampNumber(stageRect.width * 0.095, 72, 126)
+      : isSideSeat
+        ? clampNumber(stageRect.width * 0.07, 56, 88)
+        : clampNumber(stageRect.width * 0.082, 62, 104);
+    const seatHalfHeight = isBottomSeat
+      ? clampNumber(stageRect.height * 0.19, 92, 138)
+      : isTopSeat
+        ? clampNumber(stageRect.height * 0.15, 72, 108)
+        : clampNumber(stageRect.height * 0.16, 78, 118);
+
+    return {
+      x: clampNumber(rawX, seatHalfWidth, stageRect.width - seatHalfWidth),
+      y: clampNumber(rawY, seatHalfHeight, stageRect.height - seatHalfHeight),
+      angle
+    };
+  });
 }
 
 async function copyTextToClipboard(text) {
@@ -293,57 +337,126 @@ const CARD_PIP_LAYOUTS = {
   '10': [{ x: 33, y: 18 }, { x: 67, y: 18 }, { x: 50, y: 30 }, { x: 33, y: 42 }, { x: 67, y: 42 }, { x: 33, y: 58, invert: true }, { x: 67, y: 58, invert: true }, { x: 50, y: 70, invert: true }, { x: 33, y: 82, invert: true }, { x: 67, y: 82, invert: true }]
 };
 
-function CardIndex({ value, suit, compact = false, bottom = false }) {
+function SuitMark({ suit, className, style }) {
+  return (
+    <span
+      aria-hidden="true"
+      className={clsx('select-none leading-none', className)}
+      style={{
+        fontFamily: CARD_SERIF_FONT,
+        ...style
+      }}
+    >
+      {SUIT_SYMBOLS[suit]}
+    </span>
+  );
+}
+
+function CardIndex({ value, suit, compact = false, bottom = false, color }) {
+  const rankClassName = compact
+    ? value === '10'
+      ? 'text-[0.62rem]'
+      : 'text-[0.72rem]'
+    : value === '10'
+      ? 'text-[0.86rem] sm:text-[0.92rem] md:text-[1.04rem]'
+      : 'text-[1rem] sm:text-[1.06rem] md:text-[1.22rem]';
+
   return (
     <div
       className={clsx(
-        'absolute flex flex-col items-center leading-none',
-        compact ? 'gap-[1px]' : 'gap-[2px]',
-        bottom ? 'bottom-[6%] right-[7%] rotate-180' : 'left-[7%] top-[6%]'
+        'absolute z-[2] flex flex-col items-center leading-none',
+        compact ? 'gap-0' : 'gap-px',
+        bottom ? 'bottom-[4.8%] right-[6.2%] rotate-180' : 'left-[6.2%] top-[4.8%]'
       )}
     >
-      <span className={clsx('font-serif font-bold tracking-tight', compact ? 'text-[0.68rem]' : 'text-[0.98rem] sm:text-[1.08rem] md:text-[1.3rem]')}>
+      <span
+        className={clsx('font-semibold leading-none tracking-[-0.08em]', rankClassName)}
+        style={{ color, fontFamily: CARD_SERIF_FONT }}
+      >
         {value}
       </span>
-      <span className={clsx('font-serif', compact ? 'text-[0.7rem]' : 'text-[0.95rem] sm:text-[1rem] md:text-[1.18rem]')}>
-        {SUIT_SYMBOLS[suit]}
+      <SuitMark
+        suit={suit}
+        className={compact ? 'text-[0.44rem]' : 'text-[0.62rem] sm:text-[0.68rem] md:text-[0.82rem]'}
+        style={{ color }}
+      />
+    </div>
+  );
+}
+
+function CourtFace({ value, suit, compact = false, color }) {
+  return (
+    <div className={clsx('absolute inset-[20%_14%_17%] flex items-center justify-center', compact && 'inset-[21%_14%_18%]')}>
+      <SuitMark
+        suit={suit}
+        className={clsx(
+          'absolute left-1/2 top-[8%] -translate-x-1/2',
+          compact ? 'text-[0.5rem]' : 'text-[0.66rem] sm:text-[0.72rem] md:text-[0.82rem]'
+        )}
+        style={{ color }}
+      />
+      <SuitMark
+        suit={suit}
+        className={clsx(
+          'absolute bottom-[8%] left-1/2 -translate-x-1/2 rotate-180',
+          compact ? 'text-[0.5rem]' : 'text-[0.66rem] sm:text-[0.72rem] md:text-[0.82rem]'
+        )}
+        style={{ color }}
+      />
+      <span
+        className={clsx(
+          'select-none leading-[0.72]',
+          compact ? 'text-[1.34rem]' : 'text-[2.06rem] sm:text-[2.28rem] md:text-[2.82rem] lg:text-[3.08rem]'
+        )}
+        style={{
+          color,
+          fontFamily: CARD_SCRIPT_FONT,
+          transform: FACE_CARD_TRANSFORMS[value] || undefined
+        }}
+      >
+        {value}
       </span>
     </div>
   );
 }
 
-function CardCenterFace({ value, suit, compact = false }) {
-  const pipLayout = CARD_PIP_LAYOUTS[value];
+function CardCenterFace({ value, suit, compact = false, color }) {
+  if (FACE_CARD_VALUES.has(value)) {
+    return <CourtFace value={value} suit={suit} compact={compact} color={color} />;
+  }
 
-  if (pipLayout) {
+  if (value === 'A') {
     return (
-      <div className="absolute inset-[16%_16%_14%]">
-        {pipLayout.map((pip, index) => (
-          <span
-            key={`${value}-${suit}-${index}`}
-            className={clsx(
-              'absolute select-none font-serif leading-none',
-              compact ? 'text-[1rem] sm:text-[1.05rem]' : 'text-[1.18rem] sm:text-[1.4rem] md:text-[1.7rem] lg:text-[1.85rem]'
-            )}
-            style={{
-              left: `${pip.x}%`,
-              top: `${pip.y}%`,
-              transform: `translate(-50%, -50%)${pip.invert ? ' rotate(180deg)' : ''}`
-            }}
-            aria-hidden="true"
-          >
-            {SUIT_SYMBOLS[suit]}
-          </span>
-        ))}
+      <div className="absolute inset-[23%_16%_19%] flex items-center justify-center">
+        <SuitMark
+          suit={suit}
+          className={clsx(compact ? 'text-[1.15rem]' : 'text-[1.85rem] sm:text-[2.1rem] md:text-[2.75rem]')}
+          style={{ color }}
+        />
       </div>
     );
   }
 
+  const pipLayout = CARD_PIP_LAYOUTS[value];
+
   return (
-    <div className="absolute inset-[22%_16%_18%] flex items-center justify-center">
-      <span className={clsx('font-serif leading-none', compact ? 'text-[1.5rem]' : 'text-[2.15rem] sm:text-[2.45rem] md:text-[3.3rem]')}>
-        {SUIT_SYMBOLS[suit]}
-      </span>
+    <div className="absolute inset-[17%_16%_14%]">
+      {pipLayout.map((pip, index) => (
+        <SuitMark
+          key={`${value}-${suit}-${index}`}
+          suit={suit}
+          className={clsx(
+            'absolute',
+            compact ? 'text-[0.86rem] sm:text-[0.94rem]' : 'text-[1.02rem] sm:text-[1.18rem] md:text-[1.45rem] lg:text-[1.58rem]'
+          )}
+          style={{
+            color,
+            left: `${pip.x}%`,
+            top: `${pip.y}%`,
+            transform: `translate(-50%, -50%)${pip.invert ? ' rotate(180deg)' : ''}`
+          }}
+        />
+      ))}
     </div>
   );
 }
@@ -356,32 +469,39 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
   const { value, suit } = parseCard(cardString);
   const isRed = suit === 'H' || suit === 'D';
   const isCompactCard = compact || variant === 'trick';
+  const cardColor = isRed ? '#c7203b' : '#232323';
+  const cardLabel = `${CARD_VALUE_NAMES[value]} of ${SUIT_NAMES[suit]}`;
 
   return (
     <button
+      type="button"
       onClick={disabled ? undefined : onClick}
       disabled={disabled}
       title={title}
+      aria-label={cardLabel}
       className={clsx(
-        'relative flex shrink-0 flex-col justify-between overflow-hidden border border-slate-500/55 bg-gradient-to-b from-white via-white to-slate-50 transition-all duration-200',
-        variant === 'trick' ? 'rounded-none' : 'rounded-[0.38rem]',
+        'relative isolate flex shrink-0 overflow-hidden border transition-all duration-200',
+        variant === 'trick' ? 'rounded-[0.22rem]' : 'rounded-[0.34rem]',
         variant === 'trick'
-          ? 'h-full w-full p-[0.26rem] sm:p-[0.28rem]'
+          ? 'h-full w-full'
           : compact
-            ? 'h-[3.85rem] w-[2.6rem] p-1 sm:h-[4.3rem] sm:w-[2.9rem] md:h-[4.75rem] md:w-[3.2rem]'
-            : 'h-[5.2rem] w-[3.45rem] p-1.5 sm:h-[5.95rem] sm:w-[3.95rem] sm:p-1.5 md:h-[8rem] md:w-[5.2rem] md:p-2 lg:h-[8.7rem] lg:w-[5.65rem]',
-        'shadow-[0_8px_18px_rgba(0,0,0,0.14),inset_0_1px_0_rgba(255,255,255,0.96)]',
-        isRed ? 'text-red-500' : 'text-slate-800',
+            ? 'h-[3.85rem] w-[2.6rem] sm:h-[4.3rem] sm:w-[2.9rem] md:h-[4.75rem] md:w-[3.2rem]'
+            : 'h-[5.2rem] w-[3.45rem] sm:h-[5.95rem] sm:w-[3.95rem] md:h-[8rem] md:w-[5.2rem] lg:h-[8.7rem] lg:w-[5.65rem]',
         disabled && ghosted
-          ? 'cursor-not-allowed opacity-35 saturate-0 blur-[0.2px]'
+          ? 'cursor-not-allowed opacity-40 saturate-0'
           : disabled
-            ? 'cursor-default opacity-80'
-            : 'cursor-pointer hover:shadow-[0_18px_28px_-14px_rgba(0,0,0,0.38)]'
+            ? 'cursor-default opacity-90'
+            : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_18px_28px_-16px_rgba(0,0,0,0.4)]'
       )}
+      style={{
+        borderColor: '#beb5a7',
+        background: 'linear-gradient(180deg, #fffefb 0%, #ffffff 62%, #f4ecdf 100%)',
+        boxShadow: '0 10px 18px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.96)'
+      }}
     >
-      <CardIndex value={value} suit={suit} compact={isCompactCard} />
-      <CardIndex value={value} suit={suit} compact={isCompactCard} bottom />
-      <CardCenterFace value={value} suit={suit} compact={isCompactCard} />
+      <CardIndex value={value} suit={suit} compact={isCompactCard} color={cardColor} />
+      <CardIndex value={value} suit={suit} compact={isCompactCard} bottom color={cardColor} />
+      <CardCenterFace value={value} suit={suit} compact={isCompactCard} color={cardColor} />
     </button>
   );
 }
@@ -839,7 +959,7 @@ function App() {
       if (nextCardCounts) {
         setCardCounts(nextCardCounts);
       }
-      setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, 6));
+      setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
     });
 
     socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, gameFinished: finished }) => {
@@ -871,7 +991,7 @@ function App() {
       if (nextCardCounts) {
         setCardCounts(nextCardCounts);
       }
-      setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, 8));
+      setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
     });
 
     socket.on('game_error', (message) => {

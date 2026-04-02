@@ -634,6 +634,9 @@
 
   .rentz-game-frame {
     display: flex;
+    height: 100%;
+    max-height: 100%;
+    min-width: 0;
     min-height: 0;
     flex-direction: column;
     gap: 0;
@@ -644,12 +647,15 @@
     box-shadow:
       0 30px 60px rgba(0,0,0,0.16),
       inset 0 1px 0 rgba(255,255,255,0.95);
+    overflow: hidden;
     padding: 0.7rem;
   }
 
   .rentz-table-stage {
+    box-sizing: border-box;
     position: relative;
     flex: 0 1 55vh;
+    min-width: 0;
     min-height: clamp(15rem, 35vh, 22rem);
     max-height: 55vh;
     overflow: hidden;
@@ -1021,13 +1027,14 @@
     top: 55%;
     z-index: 10;
     width: min(27rem, 38vw);
+    max-width: calc(100% - 1.4rem);
     transform: translate(-50%, -50%);
   }
 
   .rentz-trick-board {
     --rentz-trick-card-width: 2.42rem;
     --rentz-trick-card-height: 3.54rem;
-    --rentz-trick-card-radius: 0;
+    --rentz-trick-card-radius: 0.22rem;
     --rentz-trick-arrow-size: 0.92rem;
     --rentz-trick-arrow-side-inset: 0.26rem;
     --rentz-trick-arrow-top: 25.5%;
@@ -1174,6 +1181,8 @@
     --rentz-bottom-panel-min-height: clamp(5.5rem, 8vh, 6.5rem);
     display: grid;
     flex: 1 1 auto;
+    height: 100%;
+    min-width: 0;
     min-height: var(--rentz-bottom-panel-min-height);
     align-items: stretch;
     gap: 0.5rem;
@@ -1196,6 +1205,7 @@
 
   .rentz-hand-panel {
     display: flex;
+    min-width: 0;
     min-height: var(--rentz-bottom-panel-min-height);
     flex-direction: column;
     padding: 0;
@@ -1239,6 +1249,7 @@
   }
 
   .rentz-hand-scroll {
+    max-width: 100%;
     min-height: 10.5rem;
     overflow-x: auto;
     overflow-y: hidden;
@@ -1348,7 +1359,8 @@
   .rentz-log-panel,
   .rentz-players-panel {
     display: flex;
-    min-height: var(--rentz-bottom-panel-min-height);
+    height: 100%;
+    min-height: 0;
     flex-direction: column;
     overflow: hidden;
   }
@@ -1356,12 +1368,47 @@
   .rentz-log-list,
   .rentz-player-list {
     display: flex;
-    flex: 1 1 auto;
+    flex: 1 1 0%;
     min-height: 0;
+    max-height: 100%;
     flex-direction: column;
     gap: 0.65rem;
-    overflow: auto;
     padding: 0.75rem;
+  }
+
+  .rentz-log-list {
+    overflow-x: hidden;
+    overflow-y: scroll;
+    scrollbar-gutter: stable;
+    scrollbar-width: auto;
+    scrollbar-color: rgba(71, 112, 146, 0.88) rgba(214, 225, 235, 0.96);
+  }
+
+  .rentz-log-list::-webkit-scrollbar {
+    width: 14px;
+  }
+
+  .rentz-log-list::-webkit-scrollbar-track {
+    background: linear-gradient(180deg, rgba(236,243,248,0.96) 0%, rgba(214,225,235,0.96) 100%);
+    border-left: 1px solid rgba(148,163,184,0.22);
+    border-radius: 999px;
+  }
+
+  .rentz-log-list::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(112,154,189,0.98) 0%, rgba(71,112,146,0.96) 100%);
+    border-radius: 999px;
+    border: 3px solid rgba(236,243,248,0.96);
+    background-clip: padding-box;
+  }
+
+  .rentz-log-list::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(88,137,177,1) 0%, rgba(52,89,122,0.98) 100%);
+    border: 3px solid rgba(236,243,248,0.96);
+    background-clip: padding-box;
+  }
+
+  .rentz-player-list {
+    overflow: auto;
   }
 
   .rentz-log-entry {
@@ -1514,6 +1561,7 @@
 
   .rentz-mobile-panels {
     display: none;
+    min-width: 0;
   }
 
   .rentz-log-panel-mobile {
@@ -1548,11 +1596,16 @@
 
   @media (min-width: 1024px) {
     .rentz-game-frame {
-      height: auto;
+      display: grid;
+      height: 100%;
+      grid-template-rows: minmax(0, 1.78fr) minmax(6.8rem, 0.96fr);
+      align-items: stretch;
     }
 
     .rentz-table-stage {
-      min-height: clamp(29rem, 63vh, 40rem);
+      height: 100%;
+      min-height: 0;
+      max-height: none;
       padding: 0.92rem 1.2rem 1.1rem;
     }
 
@@ -1628,6 +1681,7 @@
 
     .rentz-seat-slot {
       position: absolute;
+      max-width: calc(100% - 1rem);
       margin: 0;
       transform: translate(-50%, calc(-50% + clamp(0.38rem, 0.8vw, 0.58rem)));
       will-change: left, top;
@@ -1789,9 +1843,100 @@
     }
   }
 
+  @media (min-width: 1024px) and (max-height: 860px) {
+    .rentz-game-frame {
+      grid-template-rows: minmax(0, 1.66fr) minmax(5.85rem, 0.9fr);
+    }
+
+    .rentz-table-stage {
+      padding: 0.8rem 1rem 0.92rem;
+    }
+
+    .rentz-bottom-strip {
+      --rentz-bottom-panel-min-height: clamp(4.9rem, 13vh, 6rem);
+      gap: 0.42rem;
+    }
+
+    .rentz-board-area {
+      top: 52.9%;
+      width: clamp(12.5rem, calc(100% - 29rem), 17.8rem);
+    }
+
+    .rentz-seat-cluster {
+      width: clamp(4.25rem, 5vw, 5.65rem);
+    }
+
+    .rentz-avatar-shell {
+      height: clamp(3rem, 6.2vh, 4.15rem);
+      width: clamp(3rem, 6.2vh, 4.15rem);
+    }
+
+    .rentz-seat-stat {
+      min-height: 1.25rem;
+    }
+  }
+
+  @media (min-width: 1024px) and (max-height: 720px) {
+    .rentz-game-frame {
+      grid-template-rows: minmax(0, 1.52fr) minmax(5.2rem, 0.82fr);
+    }
+
+    .rentz-table-stage {
+      padding: 0.72rem 0.9rem 0.82rem;
+    }
+
+    .rentz-bottom-strip {
+      --rentz-bottom-panel-min-height: clamp(4.35rem, 11vh, 5.2rem);
+      gap: 0.34rem;
+    }
+
+    .rentz-board-area {
+      top: 52.4%;
+      width: clamp(11.5rem, calc(100% - 26rem), 16rem);
+    }
+
+    .rentz-seat-cluster {
+      width: clamp(3.8rem, 4.7vw, 5rem);
+      gap: 0.12rem;
+    }
+
+    .rentz-avatar-shell {
+      height: clamp(2.7rem, 5.6vh, 3.6rem);
+      width: clamp(2.7rem, 5.6vh, 3.6rem);
+    }
+
+    .rentz-seat-name {
+      font-size: clamp(0.54rem, 0.78vw, 0.7rem);
+    }
+
+    .rentz-seat-stat {
+      min-height: 1.05rem;
+      padding: 0.06rem 0.05rem;
+    }
+
+    .rentz-seat-stat-value {
+      font-size: 0.48rem;
+    }
+
+    .rentz-seat-stat-label {
+      font-size: 0.28rem;
+      letter-spacing: 0.04em;
+    }
+
+    .rentz-trick-board {
+      --rentz-trick-card-width: 1.7rem;
+      --rentz-trick-card-height: 2.38rem;
+      padding: 0.52rem 0.78rem 0.48rem;
+    }
+
+    .rentz-trick-slot {
+      min-height: calc(var(--rentz-trick-card-height) + 0.84rem);
+    }
+  }
+
   @media (min-width: 1024px) and (max-width: 1279px) {
     .rentz-game-frame {
-      height: auto;
+      height: 100%;
     }
 
     .rentz-marking-box {
@@ -1857,13 +2002,19 @@
     }
 
     .rentz-game-frame {
+      flex: none;
+      height: auto;
+      max-height: none;
+      overflow: visible;
       border-radius: 1.45rem;
       padding: 0.55rem;
     }
 
     .rentz-table-stage {
+      flex: none;
+      max-height: none;
       display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(9rem, 0.95fr);
+      grid-template-columns: minmax(0, 1fr) minmax(6.8rem, 31%);
       grid-template-rows: auto auto 1fr auto;
       align-items: start;
       column-gap: 0.75rem;
@@ -1884,6 +2035,8 @@
       flex-direction: column;
       align-self: start;
       justify-self: stretch;
+      min-width: 0;
+      max-width: 100%;
       padding-top: 0.2rem;
       z-index: 10;
     }
@@ -1893,6 +2046,7 @@
       left: auto;
       top: auto;
       width: 100%;
+      max-width: 100%;
       grid-column: 1;
       grid-row: 2 / span 2;
       align-self: center;
@@ -1926,7 +2080,13 @@
     }
 
     .rentz-bottom-strip {
+      height: auto;
       grid-template-columns: 1fr;
+    }
+
+    .rentz-log-panel,
+    .rentz-players-panel {
+      height: auto;
     }
 
     .rentz-verify-button {
@@ -1957,14 +2117,14 @@
     }
 
     .rentz-seat-cluster-hero .rentz-avatar-shell {
-      height: clamp(5.5rem, 22vw, 7.3rem);
-      width: clamp(5.5rem, 22vw, 7.3rem);
+      height: clamp(4.9rem, 20vw, 6.6rem);
+      width: clamp(4.9rem, 20vw, 6.6rem);
     }
   }
 
   @media (max-width: 640px) {
     .rentz-table-stage {
-      grid-template-columns: minmax(0, 1fr) minmax(8rem, 0.92fr);
+      grid-template-columns: minmax(0, 1fr) minmax(5.8rem, 34%);
       min-height: 23rem;
       row-gap: 0.72rem;
       padding: 0.8rem 0.8rem 0.9rem;
@@ -1987,11 +2147,12 @@
 
     .rentz-mobile-panels {
       gap: 0.6rem;
+      grid-template-columns: 1fr;
     }
 
     .rentz-mobile-panels > .rentz-players-panel,
     .rentz-mobile-panels > .rentz-log-panel {
-      height: 14.5rem;
+      height: 13.5rem;
     }
 
     .rentz-player-row {
@@ -2030,7 +2191,7 @@
 
   @media (max-width: 480px) {
     .rentz-table-stage {
-      grid-template-columns: minmax(0, 1fr) minmax(7.1rem, 0.84fr);
+      grid-template-columns: minmax(0, 1fr) minmax(4.9rem, 36%);
       column-gap: 0.55rem;
       row-gap: 0.65rem;
       min-height: 21.5rem;
