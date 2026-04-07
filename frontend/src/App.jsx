@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Check,
   Copy,
@@ -80,9 +80,12 @@ const JOKER_CARD_LABELS = {
   red_joker: 'Red Joker'
 };
 const CARD_ASSET_BASE_PATH = `${import.meta.env.BASE_URL}cards/`;
+const CARD_ASSET_ASPECT_RATIO = 167.0869141 / 242.6669922;
 const MAX_ACTIVITY_FEED_ITEMS = 60;
 const TRICK_CARD_CENTER_BOX_PERCENT = 3.2;
 const TRICK_CARD_ROTATION_LIMIT_DEGREES = 18;
+const HAND_CARD_MAX_ADVANCE_RATIO = 0.76;
+const HAND_CARD_SIZE_SCALE = 0.95;
 
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
@@ -412,9 +415,13 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
       title={title}
       aria-label={cardLabel}
       className={clsx(
-        'relative isolate flex shrink-0 overflow-hidden bg-transparent p-0 transition-all duration-200',
-        variant === 'trick' ? 'rounded-[0.22rem]' : 'rounded-[0.34rem]',
+        'relative isolate flex shrink-0 overflow-hidden bg-transparent p-0 transition-[transform,box-shadow,filter,opacity] duration-200',
         variant === 'trick'
+          ? 'rounded-[0.22rem]'
+          : variant === 'hand'
+            ? 'rounded-none'
+            : 'rounded-[0.34rem]',
+        variant === 'trick' || variant === 'hand'
           ? 'h-full w-full'
           : compact
             ? 'h-[3.85rem] w-[2.6rem] sm:h-[4.3rem] sm:w-[2.9rem] md:h-[4.75rem] md:w-[3.2rem]'
@@ -434,7 +441,10 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
         alt=""
         aria-hidden="true"
         draggable="false"
-        className="block h-full w-full select-none object-contain"
+        className={clsx(
+          'block h-full w-full select-none',
+          variant === 'hand' ? 'object-fill' : 'object-contain'
+        )}
       />
     </button>
   );
@@ -758,6 +768,7 @@ function App() {
   const [gameFinished, setGameFinished] = useState(false);
   const [trickPending, setTrickPending] = useState(false);
   const [hand, setHand] = useState([]);
+  const [startingHandSize, setStartingHandSize] = useState(0);
   const [cardCounts, setCardCounts] = useState({});
   const [currentTrick, setCurrentTrick] = useState([]);
   const [trickSuit, setTrickSuit] = useState(null);
@@ -771,9 +782,12 @@ function App() {
   const [finalStandings, setFinalStandings] = useState([]);
   const [topPrompts, setTopPrompts] = useState([]);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
+  const [handSpreadMetrics, setHandSpreadMetrics] = useState(null);
   const topPromptTimeoutsRef = useRef(new Map());
+  const startingHandSizeRef = useRef(0);
   const tableStageRef = useRef(null);
   const cardBoardRef = useRef(null);
+  const handScrollRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
   const [editorType, setEditorType] = useState('per_round');
@@ -845,10 +859,12 @@ function App() {
     });
 
     socket.on('game_started', ({ hand: nextHand, playerIndex, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands }) => {
+      startingHandSizeRef.current = nextHand.length;
       setGameStarted(true);
       setGameFinished(false);
       setPlayView('table');
       setHand(nextHand);
+      setStartingHandSize(nextHand.length);
       setMyIndex(playerIndex);
       setTurnIndex(nextTurnIndex);
       setTrickSuit(nextTrickSuit || null);
@@ -1150,6 +1166,7 @@ function App() {
       ? [localTablePlayer]
       : [];
   const isTableStageVisible = activeTab === 'play' && inLobby && gameStarted && !gameFinished && playView === 'table';
+  const isHandSpreadVisible = isTableStageVisible;
   const sortedHand = sortCards(hand);
   const playersForMobilePanel = [...players].sort((left, right) => {
     if (left.userId === nextTurnPlayer?.userId) {
@@ -1224,6 +1241,75 @@ function App() {
     };
   }, [desktopSeatPlayers.length, isTableStageVisible, pageZoom]);
 
+  useLayoutEffect(() => {
+    const scrollElement = handScrollRef.current;
+    const referenceHandSize = Math.max(startingHandSizeRef.current, startingHandSize);
+
+    if (!isHandSpreadVisible || !scrollElement || referenceHandSize === 0) {
+      setHandSpreadMetrics(null);
+      return undefined;
+    }
+
+    let frameId = 0;
+    const updateHandSpread = () => {
+      const scrollWidth = scrollElement.clientWidth;
+      const cardHeight = scrollElement.clientHeight;
+
+      if (!scrollWidth || !cardHeight || referenceHandSize === 0) {
+        return;
+      }
+
+      const nextCardHeight = Math.max(0, (cardHeight - 4) * HAND_CARD_SIZE_SCALE);
+      const nextCardWidth = nextCardHeight * CARD_ASSET_ASPECT_RATIO;
+      const maxAdvance = nextCardWidth * HAND_CARD_MAX_ADVANCE_RATIO;
+      const nextCardAdvance = referenceHandSize > 1
+        ? Math.min(maxAdvance, Math.max(0, (scrollWidth - nextCardWidth) / (referenceHandSize - 1)))
+        : nextCardWidth;
+      const nextSpreadWidth = nextCardWidth + (Math.max(0, referenceHandSize - 1) * nextCardAdvance);
+
+      setHandSpreadMetrics((current) => {
+        if (
+          current &&
+          Math.abs(current.cardHeight - nextCardHeight) < 0.5 &&
+          Math.abs(current.cardWidth - nextCardWidth) < 0.5 &&
+          Math.abs(current.cardAdvance - nextCardAdvance) < 0.5 &&
+          Math.abs(current.spreadWidth - nextSpreadWidth) < 0.5
+        ) {
+          return current;
+        }
+
+        return {
+          cardHeight: nextCardHeight,
+          cardWidth: nextCardWidth,
+          cardAdvance: nextCardAdvance,
+          spreadWidth: nextSpreadWidth
+        };
+      });
+    };
+
+    const queueHandSpreadUpdate = () => {
+      window.cancelAnimationFrame(frameId);
+      frameId = window.requestAnimationFrame(updateHandSpread);
+    };
+
+    queueHandSpreadUpdate();
+
+    const resizeObserver = typeof window.ResizeObserver === 'function'
+      ? new window.ResizeObserver(() => {
+        queueHandSpreadUpdate();
+      })
+      : null;
+
+    resizeObserver?.observe(scrollElement);
+    window.addEventListener('resize', queueHandSpreadUpdate);
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('resize', queueHandSpreadUpdate);
+      resizeObserver?.disconnect();
+    };
+  }, [isHandSpreadVisible, pageZoom, startingHandSize]);
+
   const isCompactGameHeader = activeTab === 'play' && inLobby && gameStarted;
 
   const renderLobbyView = () => (
@@ -1286,7 +1372,7 @@ function App() {
         <button
           onClick={toggleReady}
           className={clsx(
-            'flex-1 rounded-[1.6rem] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition-all duration-300 sm:px-8 sm:text-lg sm:tracking-[0.18em]',
+            'flex-1 rounded-[1.6rem] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition-[transform,background-color,color,box-shadow] duration-300 sm:px-8 sm:text-lg sm:tracking-[0.18em]',
             amIReady ? 'ready-button-active' : 'ready-button'
           )}
         >
@@ -1512,8 +1598,11 @@ function App() {
 
           <div className="rentz-bottom-strip">
             <section className="rentz-hand-panel">
-              <div className="rentz-hand-scroll">
-                <div className="rentz-hand-row">
+              <div ref={handScrollRef} className="rentz-hand-scroll">
+                <div
+                  className="rentz-hand-row"
+                  style={sortedHand.length > 0 && handSpreadMetrics ? { width: `${handSpreadMetrics.spreadWidth}px` } : undefined}
+                >
                   {sortedHand.map((card, index) => {
                     const playable = playableCards[card];
                     const disabled = !playable;
@@ -1527,7 +1616,14 @@ function App() {
                           'rentz-hand-card-wrap',
                           playable && 'is-playable'
                         )}
-                        style={{ zIndex: index + 1 }}
+                        style={{
+                          zIndex: index + 1,
+                          height: handSpreadMetrics ? `${handSpreadMetrics.cardHeight}px` : undefined,
+                          width: handSpreadMetrics ? `${handSpreadMetrics.cardWidth}px` : undefined,
+                          marginLeft: index > 0 && handSpreadMetrics
+                            ? `${handSpreadMetrics.cardAdvance - handSpreadMetrics.cardWidth}px`
+                            : undefined
+                        }}
                       >
                         <Card
                           cardString={card}
@@ -1535,6 +1631,7 @@ function App() {
                           disabled={disabled}
                           ghosted={shouldGhostCard}
                           title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
+                          variant="hand"
                         />
                       </div>
                     );
@@ -2024,7 +2121,7 @@ endif`}
 
   return (
     <div className="app-shell relative min-h-screen w-full overflow-hidden p-0 pt-2 font-sans transition-colors duration-700 sm:pt-4 md:p-3 md:pt-3 lg:p-4">
-      <div className="app-window macos-window relative z-20 mx-auto flex h-[calc(100dvh-0.5rem)] w-full max-w-[1680px] flex-col border border-[var(--glass-border)] shadow-2xl transition-all duration-700 ease-in-out sm:h-[calc(100dvh-1rem)] md:h-[96vh]">
+      <div className="app-window macos-window relative z-20 mx-auto flex h-[calc(100dvh-0.5rem)] w-full max-w-[1680px] flex-col border border-[var(--glass-border)] shadow-2xl transition-colors duration-500 sm:h-[calc(100dvh-1rem)] md:h-[96vh]">
         <div className="relative z-30 flex h-14 shrink-0 items-center border-b border-[var(--glass-border)] px-3 shadow-sm transition-colors duration-500 sm:px-4 md:px-5" style={{ background: 'var(--glass-bg)' }}>
           <div className="flex w-20 gap-2.5 md:w-24">
             <div className="h-3.5 w-3.5 rounded-full border border-[#e0443e] bg-[#ff5f56] shadow-[inset_0_1px_4px_rgba(0,0,0,0.2)]" />
@@ -2102,7 +2199,7 @@ endif`}
                     key={item.id}
                     onClick={() => setActiveTab(item.id)}
                     className={clsx(
-                      'flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left font-medium transition-all duration-300',
+                      'flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left font-medium transition-[transform,background-color,color,box-shadow] duration-300',
                       isActive
                         ? 'translate-x-2 font-bold text-[var(--nav-active-text)]'
                         : 'text-[var(--text-secondary)] hover:bg-black/5 hover:text-[var(--text-primary)]'
@@ -2161,7 +2258,7 @@ endif`}
                   key={item.id}
                   onClick={() => setActiveTab(item.id)}
                   className={clsx(
-                    'relative flex h-[4.5rem] min-w-[5rem] flex-col items-center justify-center gap-1 rounded-[1.45rem] px-3 transition-all duration-500',
+                    'relative flex h-[4.5rem] min-w-[5rem] flex-col items-center justify-center gap-1 rounded-[1.45rem] px-3 transition-[transform,background-color,color,box-shadow] duration-300',
                     isActive ? '-translate-y-2 scale-105 text-[var(--nav-active-text)]' : 'text-[var(--text-secondary)]'
                   )}
                 >
