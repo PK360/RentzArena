@@ -53,15 +53,36 @@ const CARD_VALUE_NAMES = {
   '2': 'Two'
 };
 
-const CARD_SERIF_FONT = '"Cormorant Garamond", "Palatino Linotype", "Book Antiqua", Georgia, serif';
-const CARD_SCRIPT_FONT = '"Great Vibes", "Apple Chancery", "Snell Roundhand", "Brush Script MT", cursive';
-const FACE_CARD_VALUES = new Set(['J', 'Q', 'K']);
-const MAX_ACTIVITY_FEED_ITEMS = 60;
-const FACE_CARD_TRANSFORMS = {
-  J: 'translate(0.02em, 0.01em)',
-  Q: 'translate(0.05em, -0.01em)',
-  K: 'translate(0.04em, 0)'
+const CARD_ASSET_VALUE_NAMES = {
+  A: 'ace',
+  K: 'king',
+  Q: 'queen',
+  J: 'jack',
+  '10': '10',
+  '9': '9',
+  '8': '8',
+  '7': '7',
+  '6': '6',
+  '5': '5',
+  '4': '4',
+  '3': '3',
+  '2': '2'
 };
+const CARD_ASSET_SUIT_NAMES = {
+  H: 'hearts',
+  D: 'diamonds',
+  C: 'clubs',
+  S: 'spades'
+};
+const ILLUSTRATED_FACE_CARD_VALUES = new Set(['J', 'Q', 'K']);
+const JOKER_CARD_LABELS = {
+  black_joker: 'Black Joker',
+  red_joker: 'Red Joker'
+};
+const CARD_ASSET_BASE_PATH = `${import.meta.env.BASE_URL}cards/`;
+const MAX_ACTIVITY_FEED_ITEMS = 60;
+const TRICK_CARD_CENTER_BOX_PERCENT = 3.2;
+const TRICK_CARD_ROTATION_LIMIT_DEGREES = 18;
 
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
@@ -93,6 +114,41 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function hashString(value) {
+  let hash = 2166136261;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  return hash >>> 0;
+}
+
+function createSeededRandom(seedValue) {
+  let seed = hashString(seedValue) || 1;
+
+  return () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+}
+
+function getTrickCardPlacement(play, index) {
+  const nextRandom = createSeededRandom([
+    play.card,
+    play.playedBy || '',
+    play.playerName || '',
+    index
+  ].join(':'));
+
+  return {
+    left: 50 + ((nextRandom() - 0.5) * TRICK_CARD_CENTER_BOX_PERCENT),
+    top: 50 + ((nextRandom() - 0.5) * TRICK_CARD_CENTER_BOX_PERCENT),
+    rotation: (nextRandom() - 0.5) * TRICK_CARD_ROTATION_LIMIT_DEGREES * 2
+  };
+}
+
 function readStoredPreference(key, fallback, allowedValues) {
   if (typeof window === 'undefined') {
     return fallback;
@@ -118,6 +174,26 @@ function readStoredPreference(key, fallback, allowedValues) {
 function parseCard(cardString) {
   const [value, suit] = cardString.split('-');
   return { value, suit };
+}
+
+function getCardAssetPath(cardString) {
+  if (JOKER_CARD_LABELS[cardString]) {
+    return `${CARD_ASSET_BASE_PATH}${cardString}.svg`;
+  }
+
+  const { value, suit } = parseCard(cardString);
+  const suffix = ILLUSTRATED_FACE_CARD_VALUES.has(value) ? '2' : '';
+
+  return `${CARD_ASSET_BASE_PATH}${CARD_ASSET_VALUE_NAMES[value]}_of_${CARD_ASSET_SUIT_NAMES[suit]}${suffix}.svg`;
+}
+
+function getCardLabel(cardString) {
+  if (JOKER_CARD_LABELS[cardString]) {
+    return JOKER_CARD_LABELS[cardString];
+  }
+
+  const { value, suit } = parseCard(cardString);
+  return `${CARD_VALUE_NAMES[value]} of ${SUIT_NAMES[suit]}`;
 }
 
 function sortCards(cards) {
@@ -275,33 +351,29 @@ function buildDesktopSeatLayout({ playerCount, stageRect, boardRect }) {
     padding
   });
   const boardOuterRadius = Math.hypot(boardRect.width, boardRect.height) / 2;
-  const preferredRadius = boardOuterRadius + clampNumber(
-    Math.min(stageRect.width, stageRect.height) * 0.055,
-    34,
+  const boardOrbitGap = clampNumber(
+    Math.min(boardRect.width, boardRect.height) * 0.9,
+    60,
+    108
+  );
+  const preferredRadius = boardOuterRadius + boardOrbitGap;
+  const minimumOrbitRadius = boardOuterRadius + clampNumber(
+    Math.min(boardRect.width, boardRect.height) * 0.42,
+    32,
     56
   );
-  const radius = clampNumber(preferredRadius, 0, Math.max(0, fitRadius));
+  const radius = Math.max(
+    minimumOrbitRadius,
+    Number.isFinite(fitRadius) ? Math.min(preferredRadius, fitRadius) : preferredRadius
+  );
 
   return angles.map((angle) => {
     const rawX = centerX + (Math.cos(angle) * radius);
     const rawY = centerY + (Math.sin(angle) * radius);
-    const isBottomSeat = Math.sin(angle) > 0.72;
-    const isTopSeat = Math.sin(angle) < -0.72;
-    const isSideSeat = Math.abs(Math.cos(angle)) > 0.72;
-    const seatHalfWidth = isBottomSeat
-      ? clampNumber(stageRect.width * 0.095, 72, 126)
-      : isSideSeat
-        ? clampNumber(stageRect.width * 0.07, 56, 88)
-        : clampNumber(stageRect.width * 0.082, 62, 104);
-    const seatHalfHeight = isBottomSeat
-      ? clampNumber(stageRect.height * 0.19, 92, 138)
-      : isTopSeat
-        ? clampNumber(stageRect.height * 0.15, 72, 108)
-        : clampNumber(stageRect.height * 0.16, 78, 118);
 
     return {
-      x: clampNumber(rawX, seatHalfWidth, stageRect.width - seatHalfWidth),
-      y: clampNumber(rawY, seatHalfHeight, stageRect.height - seatHalfHeight),
+      x: clampNumber(rawX, padding.left, stageRect.width - padding.right),
+      y: clampNumber(rawY, padding.top, stageRect.height - padding.bottom),
       angle
     };
   });
@@ -324,153 +396,13 @@ async function copyTextToClipboard(text) {
   document.body.removeChild(textArea);
 }
 
-const CARD_PIP_LAYOUTS = {
-  A: [{ x: 50, y: 50 }],
-  '2': [{ x: 50, y: 22 }, { x: 50, y: 78, invert: true }],
-  '3': [{ x: 50, y: 20 }, { x: 50, y: 50 }, { x: 50, y: 80, invert: true }],
-  '4': [{ x: 33, y: 23 }, { x: 67, y: 23 }, { x: 33, y: 77, invert: true }, { x: 67, y: 77, invert: true }],
-  '5': [{ x: 33, y: 23 }, { x: 67, y: 23 }, { x: 50, y: 50 }, { x: 33, y: 77, invert: true }, { x: 67, y: 77, invert: true }],
-  '6': [{ x: 33, y: 21 }, { x: 67, y: 21 }, { x: 33, y: 50 }, { x: 67, y: 50 }, { x: 33, y: 79, invert: true }, { x: 67, y: 79, invert: true }],
-  '7': [{ x: 33, y: 21 }, { x: 67, y: 21 }, { x: 50, y: 34 }, { x: 33, y: 50 }, { x: 67, y: 50 }, { x: 33, y: 79, invert: true }, { x: 67, y: 79, invert: true }],
-  '8': [{ x: 33, y: 19 }, { x: 67, y: 19 }, { x: 50, y: 33 }, { x: 33, y: 50 }, { x: 67, y: 50 }, { x: 50, y: 67, invert: true }, { x: 33, y: 81, invert: true }, { x: 67, y: 81, invert: true }],
-  '9': [{ x: 33, y: 18 }, { x: 67, y: 18 }, { x: 50, y: 30 }, { x: 33, y: 44 }, { x: 67, y: 44 }, { x: 50, y: 56, invert: true }, { x: 33, y: 70, invert: true }, { x: 67, y: 70, invert: true }, { x: 50, y: 82, invert: true }],
-  '10': [{ x: 33, y: 18 }, { x: 67, y: 18 }, { x: 50, y: 30 }, { x: 33, y: 42 }, { x: 67, y: 42 }, { x: 33, y: 58, invert: true }, { x: 67, y: 58, invert: true }, { x: 50, y: 70, invert: true }, { x: 33, y: 82, invert: true }, { x: 67, y: 82, invert: true }]
-};
-
-function SuitMark({ suit, className, style }) {
-  return (
-    <span
-      aria-hidden="true"
-      className={clsx('select-none leading-none', className)}
-      style={{
-        fontFamily: CARD_SERIF_FONT,
-        ...style
-      }}
-    >
-      {SUIT_SYMBOLS[suit]}
-    </span>
-  );
-}
-
-function CardIndex({ value, suit, compact = false, bottom = false, color }) {
-  const rankClassName = compact
-    ? value === '10'
-      ? 'text-[0.62rem]'
-      : 'text-[0.72rem]'
-    : value === '10'
-      ? 'text-[0.86rem] sm:text-[0.92rem] md:text-[1.04rem]'
-      : 'text-[1rem] sm:text-[1.06rem] md:text-[1.22rem]';
-
-  return (
-    <div
-      className={clsx(
-        'absolute z-[2] flex flex-col items-center leading-none',
-        compact ? 'gap-0' : 'gap-px',
-        bottom ? 'bottom-[4.8%] right-[6.2%] rotate-180' : 'left-[6.2%] top-[4.8%]'
-      )}
-    >
-      <span
-        className={clsx('font-semibold leading-none tracking-[-0.08em]', rankClassName)}
-        style={{ color, fontFamily: CARD_SERIF_FONT }}
-      >
-        {value}
-      </span>
-      <SuitMark
-        suit={suit}
-        className={compact ? 'text-[0.44rem]' : 'text-[0.62rem] sm:text-[0.68rem] md:text-[0.82rem]'}
-        style={{ color }}
-      />
-    </div>
-  );
-}
-
-function CourtFace({ value, suit, compact = false, color }) {
-  return (
-    <div className={clsx('absolute inset-[20%_14%_17%] flex items-center justify-center', compact && 'inset-[21%_14%_18%]')}>
-      <SuitMark
-        suit={suit}
-        className={clsx(
-          'absolute left-1/2 top-[8%] -translate-x-1/2',
-          compact ? 'text-[0.5rem]' : 'text-[0.66rem] sm:text-[0.72rem] md:text-[0.82rem]'
-        )}
-        style={{ color }}
-      />
-      <SuitMark
-        suit={suit}
-        className={clsx(
-          'absolute bottom-[8%] left-1/2 -translate-x-1/2 rotate-180',
-          compact ? 'text-[0.5rem]' : 'text-[0.66rem] sm:text-[0.72rem] md:text-[0.82rem]'
-        )}
-        style={{ color }}
-      />
-      <span
-        className={clsx(
-          'select-none leading-[0.72]',
-          compact ? 'text-[1.34rem]' : 'text-[2.06rem] sm:text-[2.28rem] md:text-[2.82rem] lg:text-[3.08rem]'
-        )}
-        style={{
-          color,
-          fontFamily: CARD_SCRIPT_FONT,
-          transform: FACE_CARD_TRANSFORMS[value] || undefined
-        }}
-      >
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function CardCenterFace({ value, suit, compact = false, color }) {
-  if (FACE_CARD_VALUES.has(value)) {
-    return <CourtFace value={value} suit={suit} compact={compact} color={color} />;
-  }
-
-  if (value === 'A') {
-    return (
-      <div className="absolute inset-[23%_16%_19%] flex items-center justify-center">
-        <SuitMark
-          suit={suit}
-          className={clsx(compact ? 'text-[1.15rem]' : 'text-[1.85rem] sm:text-[2.1rem] md:text-[2.75rem]')}
-          style={{ color }}
-        />
-      </div>
-    );
-  }
-
-  const pipLayout = CARD_PIP_LAYOUTS[value];
-
-  return (
-    <div className="absolute inset-[17%_16%_14%]">
-      {pipLayout.map((pip, index) => (
-        <SuitMark
-          key={`${value}-${suit}-${index}`}
-          suit={suit}
-          className={clsx(
-            'absolute',
-            compact ? 'text-[0.86rem] sm:text-[0.94rem]' : 'text-[1.02rem] sm:text-[1.18rem] md:text-[1.45rem] lg:text-[1.58rem]'
-          )}
-          style={{
-            color,
-            left: `${pip.x}%`,
-            top: `${pip.y}%`,
-            transform: `translate(-50%, -50%)${pip.invert ? ' rotate(180deg)' : ''}`
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
 function Card({ cardString, onClick, disabled, ghosted = false, compact = false, title = '', variant = 'default' }) {
   if (!cardString) {
     return null;
   }
 
-  const { value, suit } = parseCard(cardString);
-  const isRed = suit === 'H' || suit === 'D';
-  const isCompactCard = compact || variant === 'trick';
-  const cardColor = isRed ? '#c7203b' : '#232323';
-  const cardLabel = `${CARD_VALUE_NAMES[value]} of ${SUIT_NAMES[suit]}`;
+  const cardLabel = getCardLabel(cardString);
+  const cardAssetPath = getCardAssetPath(cardString);
 
   return (
     <button
@@ -480,7 +412,7 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
       title={title}
       aria-label={cardLabel}
       className={clsx(
-        'relative isolate flex shrink-0 overflow-hidden border transition-all duration-200',
+        'relative isolate flex shrink-0 overflow-hidden bg-transparent p-0 transition-all duration-200',
         variant === 'trick' ? 'rounded-[0.22rem]' : 'rounded-[0.34rem]',
         variant === 'trick'
           ? 'h-full w-full'
@@ -494,14 +426,16 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
             : 'cursor-pointer hover:-translate-y-0.5 hover:shadow-[0_18px_28px_-16px_rgba(0,0,0,0.4)]'
       )}
       style={{
-        borderColor: '#beb5a7',
-        background: 'linear-gradient(180deg, #fffefb 0%, #ffffff 62%, #f4ecdf 100%)',
-        boxShadow: '0 10px 18px rgba(0, 0, 0, 0.12), inset 0 1px 0 rgba(255, 255, 255, 0.96)'
+        boxShadow: '0 10px 18px rgba(0, 0, 0, 0.12)'
       }}
     >
-      <CardIndex value={value} suit={suit} compact={isCompactCard} color={cardColor} />
-      <CardIndex value={value} suit={suit} compact={isCompactCard} bottom color={cardColor} />
-      <CardCenterFace value={value} suit={suit} compact={isCompactCard} color={cardColor} />
+      <img
+        src={cardAssetPath}
+        alt=""
+        aria-hidden="true"
+        draggable="false"
+        className="block h-full w-full select-none object-contain"
+      />
     </button>
   );
 }
@@ -697,43 +631,33 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
   );
 }
 
-function TrickBoard({ currentTrick, playerCount, trickSuit, trickPending }) {
-  const slotCount = Math.max(4, Math.min(6, playerCount || 4));
-
+function TrickBoard({ currentTrick, trickPending, boardRef }) {
   return (
-    <section className={clsx('rentz-trick-board', trickPending && 'is-pending')}>
-      <div className="rentz-trick-board-heading">
-        <span>Central trick board</span>
-        <span>{trickSuit ? `Lead ${SUIT_NAMES[trickSuit]}` : 'Waiting for lead card'}</span>
-      </div>
+    <section
+      ref={boardRef}
+      className={clsx('rentz-trick-board', trickPending && 'is-pending')}
+      aria-label="Central trick board"
+    >
+      {(currentTrick || []).map((play, index) => {
+        const placement = getTrickCardPlacement(play, index);
 
-      <div className={clsx('rentz-trick-grid', slotCount > 4 && 'has-six-slots')}>
-        {Array.from({ length: slotCount }).map((_, index) => {
-          const play = currentTrick[index];
-
-          return (
-            <div key={`trick-slot-${index}`} className={clsx('rentz-trick-slot', play && 'is-filled')}>
-              <div className="rentz-trick-card-frame">
-                {play ? (
-                  <Card cardString={play.card} compact disabled variant="trick" />
-                ) : (
-                  <div className="rentz-trick-placeholder">
-                    <span className="rentz-trick-placeholder-card" />
-                  </div>
-                )}
-              </div>
-              <span className={clsx('rentz-trick-slot-name', !play && 'is-placeholder')}>
-                {play?.playerName || 'Waiting'}
-              </span>
+        return (
+          <div
+            key={`${play.playedBy || play.playerName || 'player'}-${play.card}-${index}`}
+            className="rentz-trick-card"
+            style={{
+              left: `${placement.left}%`,
+              top: `${placement.top}%`,
+              transform: `translate(-50%, -50%) rotate(${placement.rotation}deg)`,
+              zIndex: index + 1
+            }}
+          >
+            <div className="rentz-trick-card-content">
+              <Card cardString={play.card} compact disabled variant="trick" />
             </div>
-          );
-        })}
-
-        <span className="rentz-trick-arrow arrow-one" aria-hidden="true">→</span>
-        <span className="rentz-trick-arrow arrow-two" aria-hidden="true">↓</span>
-        <span className="rentz-trick-arrow arrow-three" aria-hidden="true">←</span>
-        <span className="rentz-trick-arrow arrow-four" aria-hidden="true">↑</span>
-      </div>
+          </div>
+        );
+      })}
     </section>
   );
 }
@@ -849,7 +773,7 @@ function App() {
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const topPromptTimeoutsRef = useRef(new Map());
   const tableStageRef = useRef(null);
-  const boardAreaRef = useRef(null);
+  const cardBoardRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
   const [editorType, setEditorType] = useState('per_round');
@@ -1207,6 +1131,7 @@ function App() {
   const nextTurnPlayer = players[turnIndex];
   const fontScalePercent = Math.round(fontScale * 100);
   const pageZoomPercent = Math.round(pageZoom * 100);
+  const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending);
   const playableCards = hand.reduce((acc, card) => {
     acc[card] = canPlayCard({
       card,
@@ -1252,7 +1177,7 @@ function App() {
 
   useEffect(() => {
     const stageElement = tableStageRef.current;
-    const boardElement = boardAreaRef.current;
+    const boardElement = cardBoardRef.current;
 
     if (!isTableStageVisible || !stageElement || !boardElement || desktopSeatPlayers.length === 0) {
       setDesktopSeatLayout([]);
@@ -1297,7 +1222,7 @@ function App() {
       window.removeEventListener('resize', queueSeatLayoutUpdate);
       resizeObserver?.disconnect();
     };
-  }, [desktopSeatPlayers.length, isTableStageVisible]);
+  }, [desktopSeatPlayers.length, isTableStageVisible, pageZoom]);
 
   const isCompactGameHeader = activeTab === 'play' && inLobby && gameStarted;
 
@@ -1576,11 +1501,10 @@ function App() {
               })}
             </div>
 
-            <div ref={boardAreaRef} className="rentz-board-area">
+            <div className="rentz-board-area">
               <TrickBoard
+                boardRef={cardBoardRef}
                 currentTrick={currentTrick}
-                playerCount={players.length}
-                trickSuit={trickSuit}
                 trickPending={trickPending || Boolean(animatingWinner)}
               />
             </div>
@@ -1594,6 +1518,7 @@ function App() {
                     const playable = playableCards[card];
                     const disabled = !playable;
                     const mustFollowSuit = isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
+                    const shouldGhostCard = disabled && (mustFollowSuit || isTurnLocked);
 
                     return (
                       <div
@@ -1608,7 +1533,7 @@ function App() {
                           cardString={card}
                           onClick={() => socket.emit('play_card', { roomId, card })}
                           disabled={disabled}
-                          ghosted={mustFollowSuit}
+                          ghosted={shouldGhostCard}
                           title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
                         />
                       </div>
