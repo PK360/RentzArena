@@ -549,7 +549,7 @@ function RentzSeatCluster({
   const isConnected = getPlayerPresence(player);
 
   return (
-    <article
+    <article data-seat-player-id={player.userId}
       className={clsx(
         'rentz-seat-cluster',
         `rentz-seat-cluster-${seatRole}`,
@@ -620,7 +620,7 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
   const isConnected = getPlayerPresence(player);
 
   return (
-    <div className={clsx('rentz-player-row', isCurrent && 'is-current')}>
+    <div data-seat-player-id={player?.userId} className={clsx('rentz-player-row', isCurrent && 'is-current')}>
       <div className="rentz-player-row-avatar">{getPlayerInitials(player)}</div>
       <div className="rentz-player-row-copy">
         <div className="rentz-player-row-name">
@@ -641,7 +641,37 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
   );
 }
 
-function TrickBoard({ currentTrick, trickPending, boardRef }) {
+function TrickBoard({ currentTrick, trickPending, trickWinnerId, boardRef }) {
+  const [flightPaths, setFlightPaths] = useState(null);
+
+  useLayoutEffect(() => {
+    if (trickPending && trickWinnerId && currentTrick.length > 0) {
+      const timer = window.setTimeout(() => {
+        let targetEl = null;
+
+        const mobileHeroEl = document.querySelector('.rentz-mobile-hero .rentz-seat-cluster');
+        if (mobileHeroEl && window.getComputedStyle(mobileHeroEl.parentElement).display !== 'none') {
+          targetEl = mobileHeroEl;
+        } else {
+          targetEl = document.querySelector(`.rentz-desktop-seats [data-seat-player-id="${trickWinnerId}"]`);
+        }
+
+        if (targetEl && boardRef.current) {
+          const boardRect = boardRef.current.getBoundingClientRect();
+          const targetRect = targetEl.getBoundingClientRect();
+
+          const flightX = targetRect.left + targetRect.width / 2 - (boardRect.left + boardRect.width / 2);
+          const flightY = targetRect.top + targetRect.height / 2 - (boardRect.top + boardRect.height / 2);
+
+          setFlightPaths({ x: flightX, y: flightY });
+        }
+      }, 50);
+      return () => window.clearTimeout(timer);
+    } else {
+      setFlightPaths(null);
+    }
+  }, [trickPending, trickWinnerId, currentTrick.length]);
+
   return (
     <section
       ref={boardRef}
@@ -650,6 +680,7 @@ function TrickBoard({ currentTrick, trickPending, boardRef }) {
     >
       {(currentTrick || []).map((play, index) => {
         const placement = getTrickCardPlacement(play, index);
+        const isFlying = flightPaths !== null;
 
         return (
           <div
@@ -658,7 +689,11 @@ function TrickBoard({ currentTrick, trickPending, boardRef }) {
             style={{
               left: `${placement.left}%`,
               top: `${placement.top}%`,
-              transform: `translate(-50%, -50%) rotate(${placement.rotation}deg)`,
+              transform: isFlying 
+                 ? `translate(calc(-50% + ${flightPaths.x}px), calc(-50% + ${flightPaths.y}px)) scale(0.3)`
+                 : `translate(-50%, -50%) rotate(${placement.rotation}deg)`,
+              transition: isFlying ? `transform 0.8s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.25s ease 0.8s` : 'none',
+              opacity: isFlying ? 0 : 1,
               zIndex: index + 1
             }}
           >
@@ -893,6 +928,7 @@ function App() {
       setAnimatingWinner(winnerName);
       setTrickWinnerId(winnerId);
       setTrickPending(true);
+      const delayTimer1 = window.setTimeout(() => {
       if (nextCollectedHands) {
         setCollectedHandsByPlayer(nextCollectedHands);
       }
@@ -900,9 +936,12 @@ function App() {
         setCardCounts(nextCardCounts);
       }
       setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+      }, 1050);
+      promptTimeouts.set(`trick_won_${Date.now()}`, delayTimer1);
     });
 
     socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, gameFinished: finished }) => {
+      const delayTimer2 = window.setTimeout(() => {
       setTurnIndex(nextTurnIndex);
       setCurrentTrick([]);
       setAnimatingWinner(null);
@@ -917,9 +956,12 @@ function App() {
       if (nextCardCounts) {
         setCardCounts(nextCardCounts);
       }
+      }, 1050);
+      promptTimeouts.set(`trick_end_${Date.now()}`, delayTimer2);
     });
 
     socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts }) => {
+      const delayTimer3 = window.setTimeout(() => {
       setGameFinished(true);
       setTrickPending(false);
       setTrickWinnerId(winnerId);
@@ -932,6 +974,8 @@ function App() {
         setCardCounts(nextCardCounts);
       }
       setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+      }, 1050);
+      promptTimeouts.set(`game_finished_${Date.now()}`, delayTimer3);
     });
 
     socket.on('game_error', (message) => {
@@ -1252,12 +1296,15 @@ function App() {
 
     let frameId = 0;
     const updateHandSpread = () => {
-      const scrollWidth = scrollElement.clientWidth;
-      const cardHeight = scrollElement.clientHeight;
+      const originalScrollWidth = scrollElement.clientWidth;
+      const originalCardHeight = scrollElement.clientHeight;
 
-      if (!scrollWidth || !cardHeight || referenceHandSize === 0) {
+      if (!originalScrollWidth || !originalCardHeight || referenceHandSize === 0) {
         return;
       }
+
+      const scrollWidth = originalScrollWidth * 0.75;
+      const cardHeight = originalCardHeight * 0.75;
 
       const nextCardHeight = Math.max(0, (cardHeight - 4) * HAND_CARD_SIZE_SCALE);
       const nextCardWidth = nextCardHeight * CARD_ASSET_ASPECT_RATIO;
@@ -1592,6 +1639,7 @@ function App() {
                 boardRef={cardBoardRef}
                 currentTrick={currentTrick}
                 trickPending={trickPending || Boolean(animatingWinner)}
+                trickWinnerId={trickWinnerId}
               />
             </div>
           </div>

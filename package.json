@@ -23,6 +23,6 @@
     "concurrently": "^8.2.2"
   },
   "dependencies": {
-    "mongodb": "^7.1.0"
+    "mongodb": "^7.1.1"
   }
 }
