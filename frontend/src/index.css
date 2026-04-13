@@ -678,9 +678,9 @@
     padding: 1rem 1.1rem 1.05rem;
   }
 
-  .rentz-marking-box {
+  .rentz-marking-box,
+  .rentz-spectator-box {
     position: absolute;
-    left: 1rem;
     top: 1rem;
     z-index: 20;
     display: flex;
@@ -706,6 +706,20 @@
     text-transform: uppercase;
   }
 
+  .rentz-marking-box {
+    left: 1rem;
+    justify-content: flex-start;
+    color: #ff6457;
+  }
+
+  .rentz-spectator-box {
+    right: 1rem;
+    min-width: clamp(8.5rem, 11vw, 10.75rem);
+    flex-direction: column;
+    align-items: stretch;
+    color: #d3f8ff;
+  }
+
   .rentz-marking-label {
     flex: 0 0 auto;
     white-space: nowrap;
@@ -723,6 +737,103 @@
 
   .rentz-marking-value.is-neutral {
     color: #ffd27d;
+  }
+
+  .rentz-spectator-toggle {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    letter-spacing: inherit;
+    line-height: inherit;
+    padding: 0;
+    text-align: left;
+    text-transform: inherit;
+  }
+
+  .rentz-spectator-toggle:hover .rentz-spectator-label,
+  .rentz-spectator-box.is-open .rentz-spectator-label {
+    color: #f2fbff;
+  }
+
+  .rentz-spectator-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.42rem;
+    min-width: 0;
+    color: #cceef8;
+    white-space: nowrap;
+  }
+
+  .rentz-spectator-popover {
+    display: flex;
+    max-height: min(13rem, 40vh);
+    flex-direction: column;
+    gap: 0.38rem;
+    margin-top: 0.55rem;
+    overflow-y: auto;
+    border-top: 1px solid rgba(255,255,255,0.16);
+    padding-top: 0.55rem;
+  }
+
+  .rentz-spectator-entry {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    padding: 0.18rem 0;
+  }
+
+  .rentz-spectator-entry-avatar {
+    display: inline-flex;
+    height: 2rem;
+    width: 2rem;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.24);
+    border-radius: 999px;
+    background: radial-gradient(circle at 30% 25%, rgba(255,255,255,0.3) 0%, rgba(160,220,255,0.15) 38%, rgba(11,27,18,0.55) 100%);
+    box-shadow:
+      inset 0 1px 1px rgba(255,255,255,0.22),
+      0 6px 12px rgba(0,0,0,0.15);
+    color: #effcff;
+    font-size: 0.75rem;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+  }
+
+  .rentz-spectator-entry-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.12rem;
+  }
+
+  .rentz-spectator-entry-name {
+    color: #f4fbff;
+    font-size: 0.7rem;
+    font-weight: 900;
+    letter-spacing: 0.04em;
+    text-transform: none;
+  }
+
+  .rentz-spectator-entry-meta,
+  .rentz-spectator-empty {
+    color: rgba(211, 238, 248, 0.8);
+    font-size: 0.6rem;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+  }
+
+  .rentz-spectator-empty {
+    padding: 0.12rem 0;
+    text-transform: none;
   }
 
   .rentz-table-corner-pills {
@@ -854,6 +965,16 @@
     text-shadow: 0 2px 8px rgba(0,0,0,0.28);
   }
 
+  @keyframes rentz-turn-marker-float {
+    0%, 100% {
+      transform: translateY(-50%);
+    }
+
+    50% {
+      transform: translateY(calc(-50% - 0.28rem));
+    }
+  }
+
   .rentz-seat-turn-marker {
     position: absolute;
     left: -0.95rem;
@@ -861,10 +982,12 @@
     transform: translateY(-50%);
     width: 0;
     height: 0;
-    border-top: 0.65rem solid transparent;
-    border-bottom: 0.65rem solid transparent;
-    border-right: 0.95rem solid #f6aa32;
+    border-left: 0.48rem solid transparent;
+    border-right: 0.48rem solid transparent;
+    border-top: 1.18rem solid #f6aa32;
     filter: drop-shadow(0 3px 4px rgba(0,0,0,0.35));
+    animation: rentz-turn-marker-float 1.65s ease-in-out infinite;
+    will-change: transform;
   }
 
   .rentz-avatar-wrap {
@@ -1523,6 +1646,12 @@
       max-width: min(17rem, 24%);
     }
 
+    .rentz-spectator-box {
+      right: 1.05rem;
+      top: 0.92rem;
+      max-width: min(17rem, 24%);
+    }
+
     .rentz-desktop-seats {
       display: block;
       inset: 0;
@@ -1826,6 +1955,10 @@
       max-width: min(16rem, 31%);
     }
 
+    .rentz-spectator-box {
+      max-width: min(16rem, 31%);
+    }
+
     .rentz-seat-cluster {
       width: clamp(4.25rem, 6.2vw, 5.35rem);
     }
@@ -1961,6 +2094,16 @@
       padding: 0.45rem 0.6rem;
     }
 
+    .rentz-spectator-box {
+      right: 0.9rem;
+      top: 0.9rem;
+      min-width: 8rem;
+      max-width: min(10.75rem, calc(100% - 1.8rem));
+      font-size: 0.72rem;
+      margin: 0;
+      padding: 0.45rem 0.6rem;
+    }
+
     .rentz-bottom-strip {
       height: auto;
       grid-template-columns: 1fr;
@@ -2077,6 +2220,19 @@
       max-width: min(14rem, 100%);
       font-size: 0.64rem;
       letter-spacing: 0.04em;
+    }
+
+    .rentz-spectator-box {
+      min-width: 7.2rem;
+      max-width: min(9.5rem, calc(100% - 1.4rem));
+      font-size: 0.64rem;
+      letter-spacing: 0.04em;
+      right: 0.7rem;
+      top: 0.7rem;
+    }
+
+    .rentz-spectator-popover {
+      max-height: min(10rem, 34vh);
     }
 
     .rentz-current-player-label {

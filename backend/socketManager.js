@@ -7,6 +7,8 @@ const { generateDeck, shuffle, dealCards } = require('./utils/cards');
 const lobbies = new Map(); // roomId -> Set(socketIds)
 const activeGames = new Map(); // roomId -> game state
 const socketToUser = new Map(); // socketId -> { userId, name }
+const MIN_PLAYERS_TO_START = 2;
+const MAX_ACTIVE_PLAYERS = 6;
 const SUIT_NAMES = {
   H: 'Hearts',
   D: 'Diamonds',
@@ -45,7 +47,135 @@ function buildStandings(game) {
     });
 }
 
-module.exports = function (io) {
+function createLobbyMember(user, socketId, { isReady = false, role = 'player' } = {}) {
+  return {
+    socketId,
+    ...user,
+    isReady,
+    role
+  };
+}
+
+function serializeLobby(lobby) {
+  return {
+    hostId: lobby.hostId,
+    players: lobby.players,
+    spectators: lobby.spectators,
+    rulesetId: lobby.rulesetId,
+    status: lobby.status
+  };
+}
+
+function emitLobbyUpdate(io, roomId, lobby, message) {
+  io.to(roomId).emit('lobby_update', {
+    ...serializeLobby(lobby),
+    ...(message ? { message } : {})
+  });
+}
+
+function getAllLobbyMembers(lobby) {
+  return [...lobby.players, ...lobby.spectators];
+}
+
+function getNextHostId(lobby) {
+  return lobby.players[0]?.userId || lobby.spectators[0]?.userId || null;
+}
+
+function addMemberToLobby(lobby, user, socketId, { isReady = false } = {}) {
+  const shouldSpectate = lobby.players.length >= MAX_ACTIVE_PLAYERS;
+  const role = shouldSpectate ? 'spectator' : 'player';
+  const member = createLobbyMember(user, socketId, {
+    isReady: role === 'player' ? isReady : false,
+    role
+  });
+
+  if (role === 'player') {
+    lobby.players.push(member);
+  } else {
+    lobby.spectators.push(member);
+  }
+
+  return {
+    assignedRole: role,
+    autoSpectator: shouldSpectate
+  };
+}
+
+function setLobbyMemberRole(lobby, socketId, nextRole) {
+  if (!['player', 'spectator'].includes(nextRole)) {
+    return { error: 'Invalid lobby role' };
+  }
+
+  const playerIndex = lobby.players.findIndex((player) => player.socketId === socketId);
+  const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.socketId === socketId);
+
+  if (playerIndex === -1 && spectatorIndex === -1) {
+    return { error: 'You are not in this lobby' };
+  }
+
+  if (nextRole === 'player') {
+    if (playerIndex !== -1) {
+      return { assignedRole: 'player', changed: false };
+    }
+
+    if (lobby.players.length >= MAX_ACTIVE_PLAYERS) {
+      return { error: `All ${MAX_ACTIVE_PLAYERS} player seats are taken. You can spectate for now.` };
+    }
+
+    const [member] = lobby.spectators.splice(spectatorIndex, 1);
+    lobby.players.push({
+      ...member,
+      isReady: false,
+      role: 'player'
+    });
+
+    return { assignedRole: 'player', changed: true };
+  }
+
+  if (spectatorIndex !== -1) {
+    return { assignedRole: 'spectator', changed: false };
+  }
+
+  const [member] = lobby.players.splice(playerIndex, 1);
+  lobby.spectators.push({
+    ...member,
+    isReady: false,
+    role: 'spectator'
+  });
+
+  return { assignedRole: 'spectator', changed: true };
+}
+
+function getStartGameValidationError(lobby, user) {
+  if (!lobby) {
+    return 'Lobby not found';
+  }
+
+  if (!user) {
+    return 'Not authenticated';
+  }
+
+  if (lobby.hostId !== user.userId) {
+    return 'Only host can start the game';
+  }
+
+  if (lobby.players.length > MAX_ACTIVE_PLAYERS) {
+    return `A lobby can have at most ${MAX_ACTIVE_PLAYERS} active players`;
+  }
+
+  if (lobby.players.length < MIN_PLAYERS_TO_START) {
+    return `At least ${MIN_PLAYERS_TO_START} players are required to start the game`;
+  }
+
+  const allReady = lobby.players.every((player) => player.isReady);
+  if (!allReady) {
+    return 'Not all players are ready';
+  }
+
+  return null;
+}
+
+function attachSocketManager(io) {
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
@@ -68,13 +198,14 @@ module.exports = function (io) {
       
       lobbies.set(roomId, {
         hostId: user.userId,
-        players: [{ socketId: socket.id, ...user, isReady: true }],
+        players: [createLobbyMember(user, socket.id, { isReady: true, role: 'player' })],
+        spectators: [],
         rulesetId: rulesetId || null,
         status: 'waiting'
       });
 
       console.log(`Room ${roomId} created by ${user.displayName || user.name}`);
-      callback({ success: true, roomId });
+      callback({ success: true, roomId, lobby: serializeLobby(lobbies.get(roomId)), assignedRole: 'player' });
     });
 
     // 2. Join a Lobby
@@ -86,37 +217,66 @@ module.exports = function (io) {
       if (!lobby) return callback({ error: 'Lobby not found' });
       if (lobby.status !== 'waiting') return callback({ error: 'Game already in progress' });
 
-      if (!lobby.players.find(p => p.socketId === socket.id)) {
+      const existingPlayer = lobby.players.find((player) => player.socketId === socket.id);
+      const existingSpectator = lobby.spectators.find((spectator) => spectator.socketId === socket.id);
+      let assignment = {
+        assignedRole: existingPlayer ? 'player' : 'spectator',
+        autoSpectator: false
+      };
+
+      if (!existingPlayer && !existingSpectator) {
         socket.join(roomId);
-        lobby.players.push({ socketId: socket.id, ...user, isReady: false });
-        io.to(roomId).emit('lobby_update', { players: lobby.players });
+        assignment = addMemberToLobby(lobby, user, socket.id);
+        emitLobbyUpdate(io, roomId, lobby);
       }
 
-      callback({ success: true, roomId, lobby });
+      callback({ success: true, roomId, lobby: serializeLobby(lobby), ...assignment });
     });
 
     // 3. Toggle Ready Status
-    socket.on('toggle_ready', ({ roomId }) => {
+    socket.on('toggle_ready', ({ roomId }, callback = () => {}) => {
       const lobby = lobbies.get(roomId);
-      if (!lobby) return;
+      if (!lobby) return callback({ error: 'Lobby not found' });
 
-      const player = lobby.players.find(p => p.socketId === socket.id);
-      if (player) {
-        player.isReady = !player.isReady;
-        io.to(roomId).emit('lobby_update', { players: lobby.players });
+      const player = lobby.players.find((entry) => entry.socketId === socket.id);
+      if (!player) {
+        return callback({ error: 'Spectators cannot ready up' });
       }
+
+      player.isReady = !player.isReady;
+      emitLobbyUpdate(io, roomId, lobby);
+      callback({ success: true, lobby: serializeLobby(lobby), isReady: player.isReady });
+    });
+
+    socket.on('set_lobby_role', ({ roomId, role }, callback = () => {}) => {
+      const lobby = lobbies.get(roomId);
+      if (!lobby) return callback({ error: 'Lobby not found' });
+      if (lobby.status !== 'waiting') return callback({ error: 'Game already in progress' });
+
+      const roleUpdate = setLobbyMemberRole(lobby, socket.id, role);
+      if (roleUpdate.error) {
+        return callback({ error: roleUpdate.error });
+      }
+
+      if (roleUpdate.changed) {
+        emitLobbyUpdate(io, roomId, lobby);
+      }
+
+      callback({
+        success: true,
+        assignedRole: roleUpdate.assignedRole,
+        lobby: serializeLobby(lobby)
+      });
     });
 
     // 4. Start Game
     socket.on('start_game', async ({ roomId }, callback) => {
       const lobby = lobbies.get(roomId);
-      if (!lobby) return callback({ error: 'Lobby not found' });
-      
       const user = socketToUser.get(socket.id);
-      if (lobby.hostId !== user.userId) return callback({ error: 'Only host can start the game' });
-
-      const allReady = lobby.players.every(p => p.isReady);
-      if (!allReady) return callback({ error: 'Not all players are ready' });
+      const validationError = getStartGameValidationError(lobby, user);
+      if (validationError) {
+        return callback({ error: validationError });
+      }
 
       lobby.status = 'playing';
       
@@ -172,10 +332,24 @@ module.exports = function (io) {
         
         // Notify players individually with their own cards (hide others)
         lobby.players.forEach((p, index) => {
-          io.to(p.socketId).emit('game_started', { 
+          io.to(p.socketId).emit('game_started', {
             message: 'The game has begun!',
             hand: hands[p.userId],
             playerIndex: index,
+            isSpectator: false,
+            turnIndex: 0,
+            trickSuit: null,
+            cardCounts: buildCardCounts(gameState),
+            collectedHandsByPlayer: buildCollectedHands(gameState)
+          });
+        });
+
+        lobby.spectators.forEach((spectator) => {
+          io.to(spectator.socketId).emit('game_started', {
+            message: 'The game has begun!',
+            hand: [],
+            playerIndex: -1,
+            isSpectator: true,
             turnIndex: 0,
             trickSuit: null,
             cardCounts: buildCardCounts(gameState),
@@ -198,13 +372,19 @@ module.exports = function (io) {
       
       if (game.trickPending) return;
       
-      const pIndex = game.players.findIndex(p => p.socketId === socket.id);
+      const pIndex = game.players.findIndex((player) => player.socketId === socket.id);
+      if (pIndex === -1) {
+        socket.emit('game_error', 'Spectators cannot play cards');
+        return;
+      }
+
       if (pIndex !== game.turnIndex) {
         socket.emit('game_error', 'It is not your turn!');
         return;
       }
       
       const hand = game.handsReady[user.userId];
+      if (!hand) return;
       if (!hand.includes(card)) return; // Prevents playing cards they don't have
       
       
@@ -322,14 +502,24 @@ module.exports = function (io) {
         // Remove from any waiting lobbies
         for (const [roomId, lobby] of lobbies.entries()) {
           if (lobby.status === 'waiting') {
-            lobby.players = lobby.players.filter(p => p.socketId !== socket.id);
-            if (lobby.players.length === 0) {
+            const playerIndex = lobby.players.findIndex((player) => player.socketId === socket.id);
+            const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.socketId === socket.id);
+
+            if (playerIndex !== -1) {
+              lobby.players.splice(playerIndex, 1);
+            } else if (spectatorIndex !== -1) {
+              lobby.spectators.splice(spectatorIndex, 1);
+            } else {
+              continue;
+            }
+
+            if (getAllLobbyMembers(lobby).length === 0) {
               lobbies.delete(roomId); // cleanup empty lobbies
             } else {
               if (lobby.hostId === user.userId) {
-                lobby.hostId = lobby.players[0].userId; // reassign host
+                lobby.hostId = getNextHostId(lobby); // reassign host
               }
-              io.to(roomId).emit('lobby_update', { players: lobby.players, message: 'A player left' });
+              emitLobbyUpdate(io, roomId, lobby, 'A player left');
             }
           }
         }
@@ -337,4 +527,8 @@ module.exports = function (io) {
       socketToUser.delete(socket.id);
     });
   });
-};
+}
+
+module.exports = attachSocketManager;
+module.exports.getStartGameValidationError = getStartGameValidationError;
+module.exports.setLobbyMemberRole = setLobbyMemberRole;

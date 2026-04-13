@@ -86,6 +86,8 @@ const TRICK_CARD_CENTER_BOX_PERCENT = 3.2;
 const TRICK_CARD_ROTATION_LIMIT_DEGREES = 18;
 const HAND_CARD_MAX_ADVANCE_RATIO = 0.76;
 const HAND_CARD_SIZE_SCALE = 0.95;
+const MIN_PLAYERS_TO_START = 2;
+const MAX_ACTIVE_PLAYERS = 6;
 
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
@@ -547,6 +549,7 @@ function RentzSeatCluster({
   const avatarSource = getPlayerAvatarSource(player);
   const rating = getPlayerRating(player);
   const isConnected = getPlayerPresence(player);
+  const showTurnMarker = isCurrent && !mobileHero;
 
   return (
     <article data-seat-player-id={player.userId}
@@ -555,11 +558,14 @@ function RentzSeatCluster({
         `rentz-seat-cluster-${seatRole}`,
         mobileHero && 'rentz-seat-cluster-hero',
         isWinner && 'is-winner',
-        isCurrent && !mobileHero && 'is-current'
+        showTurnMarker && 'is-current'
       )}
     >
-      {isCurrent && !mobileHero && (
-        <div className="rentz-seat-turn-marker" aria-label={`${getPlayerName(player)} is the current player`} />
+      {showTurnMarker && (
+        <div
+          className="rentz-seat-turn-marker"
+          aria-label={`${getPlayerName(player)} is the current player`}
+        />
       )}
 
       <div className="rentz-seat-name">{getPlayerName(player)}</div>
@@ -794,12 +800,15 @@ function App() {
   const [roomId, setRoomId] = useState('');
   const [joinInput, setJoinInput] = useState('');
   const [players, setPlayers] = useState([]);
+  const [spectators, setSpectators] = useState([]);
+  const [lobbyHostId, setLobbyHostId] = useState('');
   const [guestNameInput, setGuestNameInput] = useState('');
   const [guestProfile, setGuestProfile] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
 
   const [gameStarted, setGameStarted] = useState(false);
+  const [isSpectatingGame, setIsSpectatingGame] = useState(false);
   const [gameFinished, setGameFinished] = useState(false);
   const [trickPending, setTrickPending] = useState(false);
   const [hand, setHand] = useState([]);
@@ -816,6 +825,7 @@ function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [finalStandings, setFinalStandings] = useState([]);
   const [topPrompts, setTopPrompts] = useState([]);
+  const [isSpectatorPopoverOpen, setIsSpectatorPopoverOpen] = useState(false);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const [handSpreadMetrics, setHandSpreadMetrics] = useState(null);
   const topPromptTimeoutsRef = useRef(new Map());
@@ -823,6 +833,7 @@ function App() {
   const tableStageRef = useRef(null);
   const cardBoardRef = useRef(null);
   const handScrollRef = useRef(null);
+  const spectatorPopoverRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
   const [editorType, setEditorType] = useState('per_round');
@@ -889,18 +900,22 @@ function App() {
 
     socket.connect();
 
-    socket.on('lobby_update', ({ players: lobbyPlayers }) => {
-      setPlayers(lobbyPlayers);
+    socket.on('lobby_update', ({ players: lobbyPlayers, spectators: lobbySpectators, hostId: nextHostId }) => {
+      setPlayers(lobbyPlayers || []);
+      setSpectators(lobbySpectators || []);
+      setLobbyHostId(nextHostId || '');
     });
 
-    socket.on('game_started', ({ hand: nextHand, playerIndex, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands }) => {
-      startingHandSizeRef.current = nextHand.length;
+    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands }) => {
+      const resolvedHand = nextHand || [];
+      startingHandSizeRef.current = resolvedHand.length;
       setGameStarted(true);
+      setIsSpectatingGame(Boolean(isSpectator));
       setGameFinished(false);
       setPlayView('table');
-      setHand(nextHand);
-      setStartingHandSize(nextHand.length);
-      setMyIndex(playerIndex);
+      setHand(resolvedHand);
+      setStartingHandSize(resolvedHand.length);
+      setMyIndex(typeof playerIndex === 'number' ? playerIndex : -1);
       setTurnIndex(nextTurnIndex);
       setTrickSuit(nextTrickSuit || null);
       setCardCounts(nextCardCounts || {});
@@ -1000,6 +1015,34 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    if (!isSpectatorPopoverOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (spectatorPopoverRef.current?.contains(event.target)) {
+        return;
+      }
+
+      setIsSpectatorPopoverOpen(false);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setIsSpectatorPopoverOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [isSpectatorPopoverOpen]);
+
   const showTopPrompt = (message, tone = 'info') => {
     const promptId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setTopPrompts((current) => [...current, { id: promptId, message, tone }]);
@@ -1010,6 +1053,17 @@ function App() {
     }, 1200);
 
     topPromptTimeoutsRef.current.set(promptId, timeoutId);
+  };
+
+  const applyLobbyState = (lobby) => {
+    setPlayers(lobby?.players || []);
+    setSpectators(lobby?.spectators || []);
+    setLobbyHostId(lobby?.hostId || '');
+  };
+
+  const showErrorMessage = (message) => {
+    setErrorMsg(message);
+    window.setTimeout(() => setErrorMsg(''), 3000);
   };
 
   const createSessionProfile = (name, guest = false) => ({
@@ -1056,7 +1110,7 @@ function App() {
 
   const handleCreateLobby = () => {
     if (!activeProfile) {
-      setErrorMsg('Choose a guest name or sign in before creating a room.');
+      showErrorMessage('Choose a guest name or sign in before creating a room.');
       setActiveTab('play');
       return;
     }
@@ -1067,18 +1121,19 @@ function App() {
         setRoomId(response.roomId);
         setInLobby(true);
         setGameStarted(false);
+        setIsSpectatingGame(false);
         setGameFinished(false);
         setFinalStandings([]);
-        setPlayers([{ socketId: socket.id, name: activeProfile.name, isReady: true, userId: activeProfile.userId }]);
+        applyLobbyState(response.lobby);
       } else if (response.error) {
-        setErrorMsg(response.error);
+        showErrorMessage(response.error);
       }
     });
   };
 
   const handleJoinLobby = () => {
     if (!activeProfile) {
-      setErrorMsg('Choose a guest name or sign in before joining a room.');
+      showErrorMessage('Choose a guest name or sign in before joining a room.');
       setActiveTab('play');
       return;
     }
@@ -1093,11 +1148,15 @@ function App() {
         setRoomId(response.roomId);
         setInLobby(true);
         setGameStarted(false);
+        setIsSpectatingGame(false);
         setGameFinished(false);
         setFinalStandings([]);
-        setPlayers(response.lobby.players);
+        applyLobbyState(response.lobby);
+        if (response.autoSpectator) {
+          showTopPrompt(`All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`, 'info');
+        }
       } else if (response.error) {
-        setErrorMsg(response.error);
+        showErrorMessage(response.error);
       }
     });
   };
@@ -1155,12 +1214,49 @@ function App() {
     }
   };
 
-  const toggleReady = () => socket.emit('toggle_ready', { roomId });
-  const startGame = () => socket.emit('start_game', { roomId }, (response) => {
-    if (response.error) {
-      setErrorMsg(response.error);
+  const toggleReady = () => {
+    socket.emit('toggle_ready', { roomId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+    });
+  };
+
+  const setLobbyRole = (role) => {
+    socket.emit('set_lobby_role', { roomId, role }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+
+      showTopPrompt(
+        role === 'player' ? 'You moved into the active player seats.' : 'You are now spectating this lobby.',
+        role === 'player' ? 'success' : 'info'
+      );
+    });
+  };
+
+  const startGame = () => {
+    if (players.length < MIN_PLAYERS_TO_START) {
+      showErrorMessage(`At least ${MIN_PLAYERS_TO_START} players are required to start the game.`);
+      return;
     }
-  });
+
+    socket.emit('start_game', { roomId }, (response) => {
+      if (response.error) {
+        showErrorMessage(response.error);
+      }
+    });
+  };
 
   const applyTheme = (nextTheme) => {
     setTheme(nextTheme);
@@ -1183,15 +1279,24 @@ function App() {
   ];
 
   const activeProfile = isAuthenticated ? userProfile : guestProfile;
-  const myPlayerId = players[myIndex]?.userId || activeProfile?.userId;
-  const myPlayer = players[myIndex];
-  const amIHost = inLobby && players.length > 0 && players[0]?.socketId === socket.id;
-  const amIReady = inLobby && !!players.find((player) => player.socketId === socket.id)?.isReady;
+  const activeLobbyPlayer = players.find(
+    (player) => player.socketId === socket.id || player.userId === activeProfile?.userId
+  );
+  const mySpectatorProfile = spectators.find(
+    (spectator) => spectator.socketId === socket.id || spectator.userId === activeProfile?.userId
+  );
+  const myPlayerId = players[myIndex]?.userId || activeLobbyPlayer?.userId || activeProfile?.userId;
+  const myPlayer = players[myIndex] || activeLobbyPlayer || null;
+  const amIHost = inLobby && lobbyHostId === activeProfile?.userId;
+  const amIReady = inLobby && !!activeLobbyPlayer?.isReady;
+  const amISpectator = inLobby && !!mySpectatorProfile;
   const isMyTurn = gameStarted && !gameFinished && myIndex === turnIndex;
   const nextTurnPlayer = players[turnIndex];
   const fontScalePercent = Math.round(fontScale * 100);
   const pageZoomPercent = Math.round(pageZoom * 100);
   const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending);
+  const activeSeatsRemaining = Math.max(0, MAX_ACTIVE_PLAYERS - players.length);
+  const areActiveSeatsFull = players.length >= MAX_ACTIVE_PLAYERS;
   const playableCards = hand.reduce((acc, card) => {
     acc[card] = canPlayCard({
       card,
@@ -1203,7 +1308,7 @@ function App() {
     return acc;
   }, {});
 
-  const localTablePlayer = myPlayer || players.find((player) => player.userId === myPlayerId) || activeProfile;
+  const localTablePlayer = myPlayer || mySpectatorProfile || activeProfile;
   const desktopSeatPlayers = players.length > 0
     ? getDesktopSeatOrder(players, myIndex)
     : localTablePlayer
@@ -1360,7 +1465,7 @@ function App() {
   const isCompactGameHeader = activeTab === 'play' && inLobby && gameStarted;
 
   const renderLobbyView = () => (
-    <div className="relative z-10 w-full max-w-4xl">
+    <div className="relative z-10 w-full max-w-5xl">
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h3 className="text-2xl font-display font-extrabold text-[var(--text-primary)] sm:text-3xl">
@@ -1380,61 +1485,184 @@ function App() {
             </button>
           </div>
         </div>
-        <div className="status-pill px-4 py-2">
-          {players.length} player{players.length === 1 ? '' : 's'}
+        <div className="flex flex-wrap gap-2">
+          <div className="status-pill px-4 py-2">
+            {players.length}/{MAX_ACTIVE_PLAYERS} active
+          </div>
+          <div className="status-pill px-4 py-2">
+            {spectators.length} spectator{spectators.length === 1 ? '' : 's'}
+          </div>
         </div>
       </div>
 
-      <div className="grid gap-4">
-        {players.map((player, index) => (
-          <div key={`${player.socketId}-${index}`} className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
-            <div className="flex min-w-0 items-center gap-4">
-              <div className="seat-avatar h-12 w-12 text-sm">
-                {getPlayerName(player).charAt(0).toUpperCase()}
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(17rem,21rem)]">
+        <div className="space-y-6">
+          <section>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xl font-display font-black text-[var(--text-primary)] sm:text-2xl">Active Players</h4>
+                <p className="text-sm font-semibold text-[var(--text-secondary)]">
+                  Only these players receive cards and take turns in the match.
+                </p>
               </div>
-              <div className="min-w-0">
-                <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
-                  {getPlayerName(player)} {player.socketId === socket.id ? '(You)' : ''}
-                </div>
-                <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
-                  {index === 0 ? 'Host' : 'Guest'}
-                </div>
+              <div className="status-pill px-4 py-2">
+                {players.length}/{MAX_ACTIVE_PLAYERS} seats used
               </div>
             </div>
-            <div className={clsx('status-pill px-4 py-2', player.isReady && 'bg-emerald-200/80 text-emerald-900')}>
-              {player.isReady ? (
-                <span className="flex items-center gap-2">
-                  <Check className="h-4 w-4" />
-                  Ready
-                </span>
+
+            <div className="grid gap-4">
+              {players.length > 0 ? (
+                players.map((player, index) => {
+                  const isHostPlayer = player.userId === lobbyHostId;
+
+                  return (
+                    <div key={`${player.socketId}-${index}`} className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                      <div className="flex min-w-0 items-center gap-4">
+                        <div className="seat-avatar h-12 w-12 text-sm">
+                          {getPlayerName(player).charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
+                            {getPlayerName(player)} {player.socketId === socket.id ? '(You)' : ''}
+                          </div>
+                          <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+                            {isHostPlayer ? 'Host Player' : 'Player'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className={clsx('status-pill px-4 py-2', player.isReady && 'bg-emerald-200/80 text-emerald-900')}>
+                        {player.isReady ? (
+                          <span className="flex items-center gap-2">
+                            <Check className="h-4 w-4" />
+                            Ready
+                          </span>
+                        ) : (
+                          'Waiting'
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
               ) : (
-                'Waiting'
+                <div className="glass-panel px-4 py-5 text-sm font-semibold text-[var(--text-secondary)] sm:px-5">
+                  No active players yet.
+                </div>
               )}
             </div>
-          </div>
-        ))}
-      </div>
+          </section>
 
-      <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <button
-          onClick={toggleReady}
-          className={clsx(
-            'flex-1 rounded-[1.6rem] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition-[transform,background-color,color,box-shadow] duration-300 sm:px-8 sm:text-lg sm:tracking-[0.18em]',
-            amIReady ? 'ready-button-active' : 'ready-button'
-          )}
-        >
-          {amIReady ? 'Ready to Deal' : 'Ready Up'}
-        </button>
-        {amIHost && (
-          <button onClick={startGame} className="frutiger-button flex-1 px-6 py-4 text-base sm:px-8 sm:text-lg">
-            Start Match
-          </button>
-        )}
-        {gameFinished && (
-          <button onClick={() => setPlayView('stats')} className="flex-1 rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition hover:bg-[var(--surface-hover)] sm:px-8 sm:text-lg sm:tracking-[0.18em]">
-            View Last Game Stats
-          </button>
-        )}
+          <section>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h4 className="text-xl font-display font-black text-[var(--text-primary)] sm:text-2xl">Spectators</h4>
+                <p className="text-sm font-semibold text-[var(--text-secondary)]">
+                  Spectators watch the table without joining gameplay.
+                </p>
+              </div>
+              <div className="status-pill px-4 py-2">
+                {spectators.length} watching
+              </div>
+            </div>
+
+            <div className="grid gap-4">
+              {spectators.length > 0 ? (
+                spectators.map((spectator, index) => {
+                  const isHostSpectator = spectator.userId === lobbyHostId;
+
+                  return (
+                    <div key={`${spectator.socketId}-${index}`} className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
+                      <div className="flex min-w-0 items-center gap-4">
+                        <div className="seat-avatar h-12 w-12 text-sm">
+                          {getPlayerName(spectator).charAt(0).toUpperCase()}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
+                            {getPlayerName(spectator)} {spectator.socketId === socket.id ? '(You)' : ''}
+                          </div>
+                          <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+                            {isHostSpectator ? 'Host Spectator' : 'Spectator'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="status-pill bg-sky-100/85 px-4 py-2 text-sky-900">
+                        Spectating
+                      </div>
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="glass-panel px-4 py-5 text-sm font-semibold text-[var(--text-secondary)] sm:px-5">
+                  No one is spectating right now.
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+
+        <div className="glass-panel h-fit p-5 sm:p-6">
+          <div className="mb-4">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+              Your lobby role
+            </div>
+            <div className="mt-2 text-2xl font-black text-[var(--text-primary)]">
+              {amISpectator ? 'Spectator' : 'Active Player'}
+            </div>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[var(--text-secondary)]">
+              {amISpectator
+                ? (areActiveSeatsFull
+                  ? `All ${MAX_ACTIVE_PLAYERS} player seats are currently taken.`
+                  : `There ${activeSeatsRemaining === 1 ? 'is' : 'are'} ${activeSeatsRemaining} open player seat${activeSeatsRemaining === 1 ? '' : 's'} right now.`)
+                : 'Ready up when you want to be included in the next match.'}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-3">
+            {!amISpectator ? (
+              <>
+                <button
+                  onClick={toggleReady}
+                  className={clsx(
+                    'rounded-[1.6rem] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition-[transform,background-color,color,box-shadow] duration-300 sm:px-8 sm:text-lg sm:tracking-[0.18em]',
+                    amIReady ? 'ready-button-active' : 'ready-button'
+                  )}
+                >
+                  {amIReady ? 'Ready to Deal' : 'Ready Up'}
+                </button>
+                <button
+                  onClick={() => setLobbyRole('spectator')}
+                  className="rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-6 py-4 text-base font-black uppercase tracking-[0.16em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)] sm:px-8 sm:text-lg sm:tracking-[0.18em]"
+                >
+                  Become Spectator
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setLobbyRole('player')}
+                disabled={areActiveSeatsFull}
+                className={clsx(
+                  'rounded-[1.6rem] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition-[transform,background-color,color,box-shadow] duration-300 sm:px-8 sm:text-lg sm:tracking-[0.18em]',
+                  areActiveSeatsFull
+                    ? 'cursor-not-allowed border border-[var(--glass-border)] bg-[var(--surface-subtle)] text-[var(--text-secondary)] opacity-70'
+                    : 'ready-button'
+                )}
+              >
+                {areActiveSeatsFull ? 'Player Seats Full' : 'Join Player Seats'}
+              </button>
+            )}
+
+            {amIHost && (
+              <button onClick={startGame} className="frutiger-button px-6 py-4 text-base sm:px-8 sm:text-lg">
+                Start Match
+              </button>
+            )}
+
+            {gameFinished && (
+              <button onClick={() => setPlayView('stats')} className="rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition hover:bg-[var(--surface-hover)] sm:px-8 sm:text-lg sm:tracking-[0.18em]">
+                View Last Game Stats
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1586,6 +1814,54 @@ function App() {
               </span>
             </div>
 
+            <div
+              ref={spectatorPopoverRef}
+              className={clsx('rentz-spectator-box', isSpectatorPopoverOpen && 'is-open')}
+            >
+              <button
+                type="button"
+                className="rentz-spectator-toggle"
+                onClick={() => setIsSpectatorPopoverOpen((current) => !current)}
+                aria-expanded={isSpectatorPopoverOpen}
+                aria-controls="rentz-spectator-popover"
+                title="View spectators"
+              >
+                <span className="rentz-spectator-label">
+                  <Users className="h-4 w-4" />
+                  Spectators
+                </span>
+                <span className="rentz-marking-value is-neutral">{spectators.length}</span>
+              </button>
+
+              {isSpectatorPopoverOpen && (
+                <div id="rentz-spectator-popover" className="rentz-spectator-popover">
+                  {spectators.length > 0 ? (
+                    spectators.map((spectator, index) => (
+                      <div
+                        key={spectator.userId || spectator.socketId || index}
+                        className="rentz-spectator-entry"
+                      >
+                        <div className="rentz-spectator-entry-avatar">
+                          {getPlayerInitials(spectator)}
+                        </div>
+                        <div className="rentz-spectator-entry-copy">
+                          <div className="rentz-spectator-entry-name">
+                            {getPlayerName(spectator)}{' '}
+                            {spectator.socketId === socket.id ? '(You)' : ''}
+                          </div>
+                          <div className="rentz-spectator-entry-meta">
+                            {spectator.userId === lobbyHostId ? 'Host spectating' : 'Watching the table'}
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="rentz-spectator-empty">No spectators right now.</div>
+                  )}
+                </div>
+              )}
+            </div>
+
             <div className="rentz-table-brand">Rentz</div>
 
             <div className="rentz-mobile-hero">
@@ -1686,7 +1962,9 @@ function App() {
                   })}
 
                   {hand.length === 0 && (
-                    <div className="rentz-empty-hand">Waiting for the next hand...</div>
+                    <div className="rentz-empty-hand">
+                      {isSpectatingGame ? 'Spectating this match...' : 'Waiting for the next hand...'}
+                    </div>
                   )}
                 </div>
               </div>
@@ -1714,7 +1992,9 @@ function App() {
                   <span className="text-[0.65rem] sm:text-[0.7rem] font-bold text-[#5c7080] truncate max-w-[80px] sm:max-w-[100px]">
                     {localTablePlayer ? `${getPlayerName(localTablePlayer)}` : 'You'}
                   </span>
-                  <span className="text-[0.65rem] sm:text-[0.7rem] font-black text-[#20303b]">{hand.length} cards</span>
+                  <span className="text-[0.65rem] sm:text-[0.7rem] font-black text-[#20303b]">
+                    {isSpectatingGame ? 'Spectating' : `${hand.length} cards`}
+                  </span>
                 </div>
               </div>
             </div>
@@ -1774,8 +2054,10 @@ function App() {
   };
 
   const renderPlayContent = () => {
+    let playContent;
+
     if (!activeProfile) {
-      return (
+      playContent = (
         <div className="relative z-10 m-auto flex w-full max-w-md flex-col gap-4 px-1 text-center">
           <h3 className="text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Play as Guest</h3>
           <p className="text-base font-semibold text-[var(--text-secondary)] sm:text-sm">
@@ -1792,17 +2074,25 @@ function App() {
           </button>
         </div>
       );
+    } else if (!inLobby) {
+      playContent = renderMatchmaking();
+    } else if (!gameStarted || (gameFinished && playView !== 'stats')) {
+      playContent = renderLobbyView();
+    } else {
+      playContent = renderGameTable();
     }
 
-    if (!inLobby) {
-      return renderMatchmaking();
-    }
-
-    if (!gameStarted || (gameFinished && playView !== 'stats')) {
-      return renderLobbyView();
-    }
-
-    return renderGameTable();
+    return (
+      <>
+        {errorMsg && (
+          <div className="mb-4 flex items-center gap-2 rounded-[1.5rem] bg-red-500/90 px-4 py-3 text-sm font-bold text-white shadow-lg sm:rounded-full sm:px-6">
+            <Info className="h-5 w-5" />
+            {errorMsg}
+          </div>
+        )}
+        {playContent}
+      </>
+    );
   };
 
   const renderEditorContent = () => (
