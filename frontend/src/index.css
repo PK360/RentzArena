@@ -1301,7 +1301,23 @@
     position: relative;
     box-sizing: border-box;
     flex: 0 0 auto;
-    transition: transform 0.18s ease, filter 0.18s ease;
+    transition: transform 0.25s cubic-bezier(0.2, 0.8, 0.2, 1), filter 0.25s ease;
+    transform: translateX(var(--hover-shift, 0px));
+  }
+
+  .rentz-hand-card-wrap.is-hovered {
+    z-index: 100 !important;
+    transform: translateY(-8%) translateX(var(--hover-shift, 0px));
+    filter: drop-shadow(0 0 12px rgba(255, 255, 255, 0.45)) brightness(1.08);
+  }
+
+  @keyframes rentz-card-bob-inner {
+    0% { transform: translateY(0px); }
+    100% { transform: translateY(-4.5px); }
+  }
+
+  .rentz-hand-card-wrap.is-hovered > * {
+    animation: rentz-card-bob-inner 1s ease-in-out infinite alternate;
   }
 
   .rentz-empty-hand {

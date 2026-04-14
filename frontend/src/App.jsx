@@ -14,7 +14,8 @@ import {
   Trophy,
   UserRound,
   Users,
-  Users2
+  Users2,
+  X
 } from 'lucide-react';
 import clsx from 'clsx';
 import { io } from 'socket.io-client';
@@ -302,11 +303,7 @@ function getDesktopSeatOrder(players, myIndex) {
     return [];
   }
 
-  if (myIndex < 0 || myIndex >= players.length) {
-    return [...players];
-  }
-
-  return [...players.slice(myIndex), ...players.slice(0, myIndex)];
+  return [...players];
 }
 
 function getSeatFitRadius({ centerX, centerY, width, height, angles, padding }) {
@@ -345,8 +342,8 @@ function buildDesktopSeatLayout({ playerCount, stageRect, boardRect }) {
     bottom: clampNumber(stageRect.height * 0.18, 96, 150)
   };
   const angles = playerCount === 1
-    ? [Math.PI / 2]
-    : Array.from({ length: playerCount }, (_, index) => (Math.PI / 2) + (index * ((Math.PI * 2) / playerCount)));
+    ? [-Math.PI / 2]
+    : Array.from({ length: playerCount }, (_, index) => (-Math.PI / 2) + (index * ((Math.PI * 2) / playerCount)));
   const fitRadius = getSeatFitRadius({
     centerX,
     centerY,
@@ -695,9 +692,9 @@ function TrickBoard({ currentTrick, trickPending, trickWinnerId, boardRef }) {
             style={{
               left: `${placement.left}%`,
               top: `${placement.top}%`,
-              transform: isFlying 
-                 ? `translate(calc(-50% + ${flightPaths.x}px), calc(-50% + ${flightPaths.y}px)) scale(0.3)`
-                 : `translate(-50%, -50%) rotate(${placement.rotation}deg)`,
+              transform: isFlying
+                ? `translate(calc(-50% + ${flightPaths.x}px), calc(-50% + ${flightPaths.y}px)) scale(0.3)`
+                : `translate(-50%, -50%) rotate(${placement.rotation}deg)`,
               transition: isFlying ? `transform 0.8s cubic-bezier(0.4, 0.0, 0.2, 1), opacity 0.25s ease 0.8s` : 'none',
               opacity: isFlying ? 0 : 1,
               zIndex: index + 1
@@ -828,6 +825,8 @@ function App() {
   const [isSpectatorPopoverOpen, setIsSpectatorPopoverOpen] = useState(false);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const [handSpreadMetrics, setHandSpreadMetrics] = useState(null);
+  const [hoveredCardIndex, setHoveredCardIndex] = useState(null);
+  const [pendingPlayCard, setPendingPlayCard] = useState(null);
   const topPromptTimeoutsRef = useRef(new Map());
   const startingHandSizeRef = useRef(0);
   const tableStageRef = useRef(null);
@@ -944,51 +943,51 @@ function App() {
       setTrickWinnerId(winnerId);
       setTrickPending(true);
       const delayTimer1 = window.setTimeout(() => {
-      if (nextCollectedHands) {
-        setCollectedHandsByPlayer(nextCollectedHands);
-      }
-      if (nextCardCounts) {
-        setCardCounts(nextCardCounts);
-      }
-      setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+        if (nextCollectedHands) {
+          setCollectedHandsByPlayer(nextCollectedHands);
+        }
+        if (nextCardCounts) {
+          setCardCounts(nextCardCounts);
+        }
+        setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       }, 1050);
       promptTimeouts.set(`trick_won_${Date.now()}`, delayTimer1);
     });
 
     socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, gameFinished: finished }) => {
       const delayTimer2 = window.setTimeout(() => {
-      setTurnIndex(nextTurnIndex);
-      setCurrentTrick([]);
-      setAnimatingWinner(null);
-      if (!finished) {
-        setTrickWinnerId(null);
-      }
-      setTrickSuit(nextTrickSuit || null);
-      setTrickPending(Boolean(finished));
-      if (nextCollectedHands) {
-        setCollectedHandsByPlayer(nextCollectedHands);
-      }
-      if (nextCardCounts) {
-        setCardCounts(nextCardCounts);
-      }
+        setTurnIndex(nextTurnIndex);
+        setCurrentTrick([]);
+        setAnimatingWinner(null);
+        if (!finished) {
+          setTrickWinnerId(null);
+        }
+        setTrickSuit(nextTrickSuit || null);
+        setTrickPending(Boolean(finished));
+        if (nextCollectedHands) {
+          setCollectedHandsByPlayer(nextCollectedHands);
+        }
+        if (nextCardCounts) {
+          setCardCounts(nextCardCounts);
+        }
       }, 1050);
       promptTimeouts.set(`trick_end_${Date.now()}`, delayTimer2);
     });
 
     socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts }) => {
       const delayTimer3 = window.setTimeout(() => {
-      setGameFinished(true);
-      setTrickPending(false);
-      setTrickWinnerId(winnerId);
-      setAnimatingWinner(null);
-      setFinalStandings(standings || []);
-      if (nextCollectedHands) {
-        setCollectedHandsByPlayer(nextCollectedHands);
-      }
-      if (nextCardCounts) {
-        setCardCounts(nextCardCounts);
-      }
-      setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+        setGameFinished(true);
+        setTrickPending(false);
+        setTrickWinnerId(winnerId);
+        setAnimatingWinner(null);
+        setFinalStandings(standings || []);
+        if (nextCollectedHands) {
+          setCollectedHandsByPlayer(nextCollectedHands);
+        }
+        if (nextCardCounts) {
+          setCardCounts(nextCardCounts);
+        }
+        setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       }, 1050);
       promptTimeouts.set(`game_finished_${Date.now()}`, delayTimer3);
     });
@@ -1156,7 +1155,11 @@ function App() {
           showTopPrompt(`All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`, 'info');
         }
       } else if (response.error) {
-        showErrorMessage(response.error);
+        if (response.error === 'Game already in progress') {
+          showTopPrompt(response.error, 'error');
+        } else {
+          showErrorMessage(response.error);
+        }
       }
     });
   };
@@ -1247,7 +1250,7 @@ function App() {
 
   const startGame = () => {
     if (players.length < MIN_PLAYERS_TO_START) {
-      showErrorMessage(`At least ${MIN_PLAYERS_TO_START} players are required to start the game.`);
+      showTopPrompt(`At least ${MIN_PLAYERS_TO_START} active players are required to start the game.`, 'error');
       return;
     }
 
@@ -1307,6 +1310,12 @@ function App() {
     });
     return acc;
   }, {});
+
+  useEffect(() => {
+    if (pendingPlayCard && !playableCards[pendingPlayCard]) {
+      setPendingPlayCard(null);
+    }
+  }, [pendingPlayCard, playableCards]);
 
   const localTablePlayer = myPlayer || mySpectatorProfile || activeProfile;
   const desktopSeatPlayers = players.length > 0
@@ -1921,45 +1930,125 @@ function App() {
           </div>
 
           <div className="rentz-bottom-strip">
-            <section className="rentz-hand-panel">
+            <section className="rentz-hand-panel relative">
+              {pendingPlayCard && (
+                <div className="absolute right-4 top-1 z-[110] flex origin-top-right scale-[0.93] flex-col items-center gap-1.5 rounded-[1.2rem] border border-[rgba(255,255,255,0.7)] bg-[linear-gradient(180deg,rgba(255,255,255,0.65)_0%,rgba(210,225,240,0.5)_100%)] p-2 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_8px_16px_rgba(30,50,70,0.12)] backdrop-blur-md">
+                  <span className="text-[0.62rem] font-black uppercase tracking-[0.08em] text-[#1e3445] drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)] pt-0.5">Place card?</span>
+                  <div className="flex w-full justify-between gap-1.5 px-0.5">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setPendingPlayCard(null);
+                      }}
+                      className="flex h-[1.35rem] w-full flex-1 items-center justify-center rounded-full border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.8)_0%,rgba(230,235,240,0.8)_100%)] text-slate-500 shadow-sm transition hover:brightness-105"
+                    >
+                      <X className="h-3 w-3" strokeWidth={3} />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        socket.emit('play_card', { roomId, card: pendingPlayCard });
+                        setPendingPlayCard(null);
+                      }}
+                      className="flex h-[1.35rem] w-full flex-1 items-center justify-center rounded-full border border-[#b4e854] bg-[linear-gradient(180deg,#d4fc79_0%,#96e6a1_100%)] text-[#2f5c15] shadow-[0_2px_4px_rgba(150,230,161,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:brightness-105"
+                    >
+                      <Check className="h-3 w-3" strokeWidth={3} />
+                    </button>
+                  </div>
+                </div>
+              )}
               <div ref={handScrollRef} className="rentz-hand-scroll">
                 <div
                   className="rentz-hand-row"
                   style={sortedHand.length > 0 && handSpreadMetrics ? { width: `${handSpreadMetrics.spreadWidth}px` } : undefined}
                 >
-                  {sortedHand.map((card, index) => {
-                    const playable = playableCards[card];
-                    const disabled = !playable;
-                    const mustFollowSuit = isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
-                    const shouldGhostCard = disabled && (mustFollowSuit || isTurnLocked);
+                  {(() => {
+                    let hoverShifts = [];
+                    if (sortedHand.length > 0) {
+                      const N = sortedHand.length;
+                      hoverShifts = new Array(N).fill(0);
+                      const effectiveHoverIndex = hoveredCardIndex !== null 
+                        ? hoveredCardIndex 
+                        : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null);
+                      
+                      if (effectiveHoverIndex !== null && handSpreadMetrics && N > 1) {
+                        const H = effectiveHoverIndex;
+                        const A = handSpreadMetrics.cardAdvance;
+                        const hoverWeight = 3.5;
+                        
+                        const leftTotalWeight = (H > 0) ? ((H - 1) * 1 + hoverWeight) : 0;
+                        let currentX = 0;
+                        for (let i = 0; i <= H; i++) {
+                          hoverShifts[i] = currentX - i * A;
+                          if (i === H - 1) {
+                            currentX += (H * A) * (hoverWeight / leftTotalWeight);
+                          } else if (i < H - 1) {
+                            currentX += (H * A) * (1 / leftTotalWeight);
+                          }
+                        }
+                        
+                        const R = N - 1 - Math.max(0, H);
+                        const rightTotalWeight = (R > 0) ? ((R - 1) * 1 + hoverWeight) : 0;
+                        currentX = H * A;
+                        for (let i = H + 1; i < N; i++) {
+                          if (i === H + 1) {
+                            currentX += (R * A) * (hoverWeight / rightTotalWeight);
+                          } else {
+                            currentX += (R * A) * (1 / rightTotalWeight);
+                          }
+                          hoverShifts[i] = currentX - i * A;
+                        }
+                      }
+                    }
 
-                    return (
-                      <div
-                        key={`${card}-${index}`}
-                        className={clsx(
-                          'rentz-hand-card-wrap',
-                          playable && 'is-playable'
-                        )}
-                        style={{
-                          zIndex: index + 1,
-                          height: handSpreadMetrics ? `${handSpreadMetrics.cardHeight}px` : undefined,
-                          width: handSpreadMetrics ? `${handSpreadMetrics.cardWidth}px` : undefined,
-                          marginLeft: index > 0 && handSpreadMetrics
-                            ? `${handSpreadMetrics.cardAdvance - handSpreadMetrics.cardWidth}px`
-                            : undefined
-                        }}
-                      >
-                        <Card
-                          cardString={card}
-                          onClick={() => socket.emit('play_card', { roomId, card })}
-                          disabled={disabled}
-                          ghosted={shouldGhostCard}
-                          title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
-                          variant="hand"
-                        />
-                      </div>
-                    );
-                  })}
+                    return sortedHand.map((card, index) => {
+                      const playable = playableCards[card];
+                      const disabled = !playable;
+                      const mustFollowSuit = isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
+                      const shouldGhostCard = disabled && (mustFollowSuit || isTurnLocked);
+
+                      const isCardHovered = (hoveredCardIndex !== null ? hoveredCardIndex : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null)) === index;
+
+                      return (
+                        <div
+                          key={`${card}-${index}`}
+                          className={clsx(
+                            'rentz-hand-card-wrap',
+                            playable && 'is-playable',
+                            isCardHovered && 'is-hovered'
+                          )}
+                          onMouseEnter={() => setHoveredCardIndex(index)}
+                          onMouseLeave={() => setHoveredCardIndex(null)}
+                          style={{
+                            zIndex: index + 1,
+                            height: handSpreadMetrics ? `${handSpreadMetrics.cardHeight}px` : undefined,
+                            width: handSpreadMetrics ? `${handSpreadMetrics.cardWidth}px` : undefined,
+                            marginLeft: index > 0 && handSpreadMetrics
+                              ? `${handSpreadMetrics.cardAdvance - handSpreadMetrics.cardWidth}px`
+                              : undefined,
+                            '--hover-shift': `${hoverShifts[index]}px`
+                          }}
+                        >
+                          <Card
+                            cardString={card}
+                            onClick={() => {
+                              if (disabled) return;
+                              const isMobileDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches || window.innerWidth < 1024;
+                              if (isMobileDevice) {
+                                setPendingPlayCard(card);
+                              } else {
+                                socket.emit('play_card', { roomId, card });
+                              }
+                            }}
+                            disabled={disabled}
+                            ghosted={shouldGhostCard}
+                            title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
+                            variant="hand"
+                          />
+                        </div>
+                      );
+                    });
+                  })()}
 
                   {hand.length === 0 && (
                     <div className="rentz-empty-hand">
@@ -1979,7 +2068,7 @@ function App() {
                 <span className="text-[0.85rem] sm:text-[0.95rem]">Review taken hands</span>
               </button>
 
-              <div 
+              <div
                 className="flex w-full shrink-0 items-center justify-between rounded-[1.3rem] border border-[rgba(255,255,255,0.74)] px-3 py-2 sm:px-4 sm:py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(148,163,184,0.16),0_8px_16px_rgba(0,0,0,0.1)]"
                 style={{ background: 'linear-gradient(180deg, rgba(240,245,249,0.96) 0%, rgba(208,219,230,0.92) 100%)' }}
               >
@@ -2266,85 +2355,85 @@ function App() {
           Back to Editor
         </button>
       </div>
-      
+
       <div className="glass-panel flex-1 overflow-y-auto p-5 sm:p-8">
         <div className="space-y-8 text-sm font-medium leading-7 text-[var(--text-secondary)]">
-        <section>
-          <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Overview</h4>
-          <p>The rules engine supports custom Rentz rules executed either <code>per_round</code> or <code>end_game</code>. Special variables are made available to your scripts at runtime.</p>
-        </section>
+          <section>
+            <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Overview</h4>
+            <p>The rules engine supports custom Rentz rules executed either <code>per_round</code> or <code>end_game</code>. Special variables are made available to your scripts at runtime.</p>
+          </section>
 
-        <section>
-          <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Variables</h4>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <strong className="text-base text-[var(--text-primary)]">POINTS</strong>
-              <p className="mt-1 text-xs">The current score of the player.</p>
+          <section>
+            <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Variables</h4>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">POINTS</strong>
+                <p className="mt-1 text-xs">The current score of the player.</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">TRICKS_WON</strong>
+                <p className="mt-1 text-xs">The number of tricks currently won by the player.</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">[SUIT]_COUNT</strong>
+                <p className="mt-1 text-xs">Number of specific suits captured (e.g. <code>HEART_COUNT</code>, <code>SPADE_COUNT</code>).</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">[SUIT]_[VALUE]</strong>
+                <p className="mt-1 text-xs">Boolean if the specific card was captured (e.g. <code>HEART_KING</code>, <code>DIAMOND_JACK</code>).</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">CARD_NR</strong>
+                <p className="mt-1 text-xs">The total number of cards currently collected by the player.</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">PLAYER_COUNT</strong>
+                <p className="mt-1 text-xs">The total number of players in the game.</p>
+              </div>
             </div>
-            <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <strong className="text-base text-[var(--text-primary)]">TRICKS_WON</strong>
-              <p className="mt-1 text-xs">The number of tricks currently won by the player.</p>
-            </div>
-            <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <strong className="text-base text-[var(--text-primary)]">[SUIT]_COUNT</strong>
-              <p className="mt-1 text-xs">Number of specific suits captured (e.g. <code>HEART_COUNT</code>, <code>SPADE_COUNT</code>).</p>
-            </div>
-            <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <strong className="text-base text-[var(--text-primary)]">[SUIT]_[VALUE]</strong>
-              <p className="mt-1 text-xs">Boolean if the specific card was captured (e.g. <code>HEART_KING</code>, <code>DIAMOND_JACK</code>).</p>
-            </div>
-            <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <strong className="text-base text-[var(--text-primary)]">CARD_NR</strong>
-              <p className="mt-1 text-xs">The total number of cards currently collected by the player.</p>
-            </div>
-            <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <strong className="text-base text-[var(--text-primary)]">PLAYER_COUNT</strong>
-              <p className="mt-1 text-xs">The total number of players in the game.</p>
-            </div>
-          </div>
-        </section>
+          </section>
 
-        <section>
-          <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Functions & Commands</h4>
-          <ul className="space-y-4">
-            <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">add(value)</code>
-              <p className="mt-1">Adds the specified integer expression to the player's score.</p>
-            </li>
-            <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">set_to(value)</code>
-              <p className="mt-1">Hardcodes the player's score directly to the specified expression.</p>
-            </li>
-            <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">reset_to(value)</code>
-              <p className="mt-1">Resets the score back to a default value, optionally taking an expression.</p>
-            </li>
-            <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">end()</code>
-              <p className="mt-1">Instantly ends the current round context execution.</p>
-            </li>
-            <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-              <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">game_end()</code>
-              <p className="mt-1">Forces the game to conclude and proceeds to final standings.</p>
-            </li>
-          </ul>
-        </section>
+          <section>
+            <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Functions & Commands</h4>
+            <ul className="space-y-4">
+              <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">add(value)</code>
+                <p className="mt-1">Adds the specified integer expression to the player's score.</p>
+              </li>
+              <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">set_to(value)</code>
+                <p className="mt-1">Hardcodes the player's score directly to the specified expression.</p>
+              </li>
+              <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">reset_to(value)</code>
+                <p className="mt-1">Resets the score back to a default value, optionally taking an expression.</p>
+              </li>
+              <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">end()</code>
+                <p className="mt-1">Instantly ends the current round context execution.</p>
+              </li>
+              <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">game_end()</code>
+                <p className="mt-1">Forces the game to conclude and proceeds to final standings.</p>
+              </li>
+            </ul>
+          </section>
 
-        <section>
-          <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Control Flow & Logic</h4>
-          <p className="mb-3">Standard logical branches are fully supported. Conditions must be wrapped in parentheses.</p>
-          <ul className="list-inside list-disc space-y-2 pl-4">
-            <li><strong>Statements:</strong> <code>if</code>, <code>elif</code>, <code>else</code>, <code>endif</code></li>
-            <li><strong>Comparisons:</strong> <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code></li>
-            <li><strong>Logical Operators:</strong> <code>and</code>, <code>or</code>, <code>not</code></li>
-            <li><strong>Math Operators:</strong> <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code></li>
-          </ul>
-        </section>
+          <section>
+            <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Control Flow & Logic</h4>
+            <p className="mb-3">Standard logical branches are fully supported. Conditions must be wrapped in parentheses.</p>
+            <ul className="list-inside list-disc space-y-2 pl-4">
+              <li><strong>Statements:</strong> <code>if</code>, <code>elif</code>, <code>else</code>, <code>endif</code></li>
+              <li><strong>Comparisons:</strong> <code>==</code>, <code>!=</code>, <code>&gt;</code>, <code>&lt;</code>, <code>&gt;=</code>, <code>&lt;=</code></li>
+              <li><strong>Logical Operators:</strong> <code>and</code>, <code>or</code>, <code>not</code></li>
+              <li><strong>Math Operators:</strong> <code>+</code>, <code>-</code>, <code>*</code>, <code>/</code></li>
+            </ul>
+          </section>
 
-        <section>
-          <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Comprehensive Example</h4>
-          <pre className="overflow-x-auto rounded-[1.3rem] bg-slate-950/85 p-6 font-mono text-sm leading-relaxed text-lime-100 shadow-inner">
-{`if (HEART_KING)
+          <section>
+            <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Comprehensive Example</h4>
+            <pre className="overflow-x-auto rounded-[1.3rem] bg-slate-950/85 p-6 font-mono text-sm leading-relaxed text-lime-100 shadow-inner">
+              {`if (HEART_KING)
   add(-100)
 elif (HEART_COUNT > 0)
   add(HEART_COUNT * -20)
@@ -2364,8 +2453,8 @@ endif
 if (POINTS < -500)
   game_end()
 endif`}
-          </pre>
-        </section>
+            </pre>
+          </section>
         </div>
       </div>
     </div>
@@ -2509,7 +2598,11 @@ endif`}
                         topPrompt.tone === 'info' && 'border-sky-100/95 bg-white/80 text-sky-700'
                       )}
                     >
-                      <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      {topPrompt.tone === 'error' ? (
+                        <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      ) : (
+                        <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      )}
                     </div>
                     <div className="min-w-0 whitespace-normal break-words text-xs font-black leading-5 text-[var(--text-primary)] sm:text-sm md:text-base">
                       {topPrompt.message}
