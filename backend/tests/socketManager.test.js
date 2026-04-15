@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert');
-const { getStartGameValidationError, setLobbyMemberRole } = require('../socketManager');
+const { bumpGameStateVersion, getStartGameValidationError, setLobbyMemberRole } = require('../socketManager');
 
 test('prevents starting a game when the lobby has only one player', () => {
   const error = getStartGameValidationError(
@@ -63,4 +63,12 @@ test('prevents moving a spectator into the player list when all six seats are ta
   assert.strictEqual(result.error, 'All 6 player seats are taken. You can spectate for now.');
   assert.strictEqual(lobby.players.length, 6);
   assert.strictEqual(lobby.spectators.length, 1);
+});
+
+test('bumps the gameplay state version monotonically for room sync events', () => {
+  const game = { stateVersion: 0 };
+
+  assert.strictEqual(bumpGameStateVersion(game), 1);
+  assert.strictEqual(bumpGameStateVersion(game), 2);
+  assert.strictEqual(game.stateVersion, 2);
 });

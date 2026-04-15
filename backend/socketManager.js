@@ -47,6 +47,11 @@ function buildStandings(game) {
     });
 }
 
+function bumpGameStateVersion(game) {
+  game.stateVersion = (game.stateVersion || 0) + 1;
+  return game.stateVersion;
+}
+
 function createLobbyMember(user, socketId, { isReady = false, role = 'player' } = {}) {
   return {
     socketId,
@@ -296,6 +301,7 @@ function attachSocketManager(io) {
         })),
         status: 'playing',
         handsReady: hands,
+        stateVersion: 0,
         turnIndex: 0,
         trickPending: false,
         currentTrick: [], // cards played this round
@@ -330,6 +336,8 @@ function attachSocketManager(io) {
         });
         */
         
+        const gameStartedVersion = bumpGameStateVersion(gameState);
+
         // Notify players individually with their own cards (hide others)
         lobby.players.forEach((p, index) => {
           io.to(p.socketId).emit('game_started', {
@@ -339,6 +347,7 @@ function attachSocketManager(io) {
             isSpectator: false,
             turnIndex: 0,
             trickSuit: null,
+            stateVersion: gameStartedVersion,
             cardCounts: buildCardCounts(gameState),
             collectedHandsByPlayer: buildCollectedHands(gameState)
           });
@@ -352,6 +361,7 @@ function attachSocketManager(io) {
             isSpectator: true,
             turnIndex: 0,
             trickSuit: null,
+            stateVersion: gameStartedVersion,
             cardCounts: buildCardCounts(gameState),
             collectedHandsByPlayer: buildCollectedHands(gameState)
           });
@@ -418,11 +428,13 @@ function attachSocketManager(io) {
       
       // Advance turn sequentially
       game.turnIndex = (game.turnIndex + 1) % game.players.length;
+      const gameUpdateVersion = bumpGameStateVersion(game);
       
       io.to(roomId).emit('game_update', {
         currentTrick: game.currentTrick,
         turnIndex: game.turnIndex,
         trickSuit: game.trickSuit,
+        stateVersion: gameUpdateVersion,
         cardCounts: buildCardCounts(game)
       });
       
@@ -453,11 +465,13 @@ function attachSocketManager(io) {
         
         // Trick winner goes first next round
         game.turnIndex = game.players.findIndex(p => p.userId === winningPlay.playedBy);
+        const trickWonVersion = bumpGameStateVersion(game);
         
         io.to(roomId).emit('trick_won', {
            winnerName: winningPlay.playerName,
            winnerId: winningPlay.playedBy,
            trickSuit: game.trickSuit,
+           stateVersion: trickWonVersion,
            collectedHandsByPlayer: buildCollectedHands(game),
            cardCounts: buildCardCounts(game)
         });
@@ -469,11 +483,13 @@ function attachSocketManager(io) {
           const allHandsEmpty = game.players.every(
             (player) => game.handsReady[player.userId].length === 0
           );
+          const trickEndVersion = bumpGameStateVersion(game);
           
           io.to(roomId).emit('trick_end', {
             nextTurnIndex: game.turnIndex,
             collectedHandsCount: game.collectedHands.length,
             trickSuit: null,
+            stateVersion: trickEndVersion,
             collectedHandsByPlayer: buildCollectedHands(game),
             cardCounts: buildCardCounts(game),
             gameFinished: allHandsEmpty
@@ -481,10 +497,12 @@ function attachSocketManager(io) {
 
           if (allHandsEmpty) {
             game.status = 'finished';
+            const gameFinishedVersion = bumpGameStateVersion(game);
 
             io.to(roomId).emit('game_finished', {
               winnerId: winningPlay.playedBy,
               winnerName: winningPlay.playerName,
+              stateVersion: gameFinishedVersion,
               standings: buildStandings(game),
               collectedHandsByPlayer: buildCollectedHands(game),
               cardCounts: buildCardCounts(game)
@@ -532,3 +550,4 @@ function attachSocketManager(io) {
 module.exports = attachSocketManager;
 module.exports.getStartGameValidationError = getStartGameValidationError;
 module.exports.setLobbyMemberRole = setLobbyMemberRole;
+module.exports.bumpGameStateVersion = bumpGameStateVersion;

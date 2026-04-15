@@ -328,54 +328,149 @@ function getSeatFitRadius({ centerX, centerY, width, height, angles, padding }) 
   }, Number.POSITIVE_INFINITY);
 }
 
-function buildDesktopSeatLayout({ playerCount, stageRect, boardRect }) {
+function getDesktopSeatLayoutMetrics({ playerCount, stageRect, boardRect, stageTightness = 0 }) {
   if (!playerCount) {
-    return [];
+    return null;
   }
 
-  const centerX = boardRect.left - stageRect.left + (boardRect.width / 2);
-  const centerY = boardRect.top - stageRect.top + (boardRect.height / 2);
+  const boardCenterX = boardRect.left - stageRect.left + (boardRect.width / 2);
+  const boardCenterY = boardRect.top - stageRect.top + (boardRect.height / 2);
+  const stageMinDimension = Math.min(stageRect.width, stageRect.height);
+  const tightZoomFactor = clampNumber(stageTightness, 0, 1);
+  const seatFootprintScale = 1 - (tightZoomFactor * 0.18);
+  const seatFootprintX = clampNumber(stageMinDimension * 0.15 * seatFootprintScale, 92, 142);
+  const seatFootprintY = clampNumber(stageMinDimension * 0.2 * seatFootprintScale, 104, 168);
+  const seatHalfWidth = seatFootprintX / 2;
+  const seatHalfHeight = seatFootprintY / 2;
   const padding = {
-    left: clampNumber(stageRect.width * 0.08, 72, 122),
-    right: clampNumber(stageRect.width * 0.08, 72, 122),
-    top: clampNumber(stageRect.height * 0.14, 78, 122),
-    bottom: clampNumber(stageRect.height * 0.18, 96, 150)
+    left: clampNumber((stageRect.width * 0.042) - (tightZoomFactor * 10), 14, 52),
+    right: clampNumber((stageRect.width * 0.042) - (tightZoomFactor * 10), 14, 52),
+    top: clampNumber((stageRect.height * 0.022) - (tightZoomFactor * 7), 4, 24),
+    bottom: clampNumber((stageRect.height * 0.026) - (tightZoomFactor * 8), 6, 26)
   };
+  const boardTop = boardRect.top - stageRect.top;
+  const boardBottom = boardRect.bottom - stageRect.top;
+  const spaceAboveBoard = Math.max(0, boardTop - padding.top);
+  const spaceBelowBoard = Math.max(0, stageRect.height - padding.bottom - boardBottom);
+  const upwardCenterShift = clampNumber(
+    ((spaceAboveBoard - spaceBelowBoard) * 0.42) + (stageRect.height * 0.035),
+    0,
+    stageRect.height * 0.16
+  );
+  const centerX = boardCenterX;
+  const centerY = boardCenterY - upwardCenterShift;
   const angles = playerCount === 1
     ? [-Math.PI / 2]
     : Array.from({ length: playerCount }, (_, index) => (-Math.PI / 2) + (index * ((Math.PI * 2) / playerCount)));
-  const fitRadius = getSeatFitRadius({
+  const maxRadiusX = Math.max(
+    0,
+    Math.min(
+      centerX - padding.left - seatHalfWidth,
+      stageRect.width - padding.right - centerX - seatHalfWidth
+    )
+  );
+  const maxRadiusY = Math.max(
+    0,
+    Math.min(
+      centerY - padding.top - seatHalfHeight,
+      stageRect.height - padding.bottom - centerY - seatHalfHeight
+    )
+  );
+  const maxRadiusTop = Math.max(0, centerY - padding.top - seatHalfHeight);
+  const maxRadiusBottom = Math.max(0, stageRect.height - padding.bottom - centerY - seatHalfHeight);
+  const preferredRadiusX = (boardRect.width / 2) + seatHalfWidth + clampNumber(stageRect.width * 0.104, 76, 134) + (clampNumber(stageRect.width * 0.072, 28, 76) * tightZoomFactor);
+  const preferredRadiusY = (boardRect.height / 2) + seatHalfHeight + clampNumber(stageRect.height * 0.205, 112, 196) + (clampNumber(stageRect.height * 0.11, 42, 92) * tightZoomFactor);
+  const minimumRadiusX = (boardRect.width / 2) + seatHalfWidth + clampNumber(stageRect.width * 0.068, 52, 98);
+  const minimumRadiusY = (boardRect.height / 2) + seatHalfHeight + clampNumber(stageRect.height * 0.13, 76, 134);
+
+  return {
+    angles,
     centerX,
     centerY,
-    width: stageRect.width,
-    height: stageRect.height,
-    angles,
-    padding
+    maxRadiusX,
+    maxRadiusY,
+    maxRadiusTop,
+    maxRadiusBottom,
+    minimumRadiusX,
+    minimumRadiusY,
+    padding,
+    preferredRadiusX,
+    preferredRadiusY
+  };
+}
+
+function getDesktopStageTightness({ playerCount, stageRect, boardRect }) {
+  const baseMetrics = getDesktopSeatLayoutMetrics({
+    playerCount,
+    stageRect,
+    boardRect,
+    stageTightness: 0
   });
-  const boardOuterRadius = Math.hypot(boardRect.width, boardRect.height) / 2;
-  const boardOrbitGap = clampNumber(
-    Math.min(boardRect.width, boardRect.height) * 0.9,
-    60,
-    108
+
+  if (!baseMetrics) {
+    return 0;
+  }
+
+  const horizontalCompression = clampNumber(
+    (baseMetrics.preferredRadiusX - baseMetrics.maxRadiusX) / Math.max(baseMetrics.preferredRadiusX, 1),
+    0,
+    1
   );
-  const preferredRadius = boardOuterRadius + boardOrbitGap;
-  const minimumOrbitRadius = boardOuterRadius + clampNumber(
-    Math.min(boardRect.width, boardRect.height) * 0.42,
-    32,
-    56
-  );
-  const radius = Math.max(
-    minimumOrbitRadius,
-    Number.isFinite(fitRadius) ? Math.min(preferredRadius, fitRadius) : preferredRadius
+  const verticalCompression = clampNumber(
+    (baseMetrics.preferredRadiusY - baseMetrics.maxRadiusY) / Math.max(baseMetrics.preferredRadiusY, 1),
+    0,
+    1
   );
 
-  return angles.map((angle) => {
-    const rawX = centerX + (Math.cos(angle) * radius);
-    const rawY = centerY + (Math.sin(angle) * radius);
+  return clampNumber(Math.max(horizontalCompression * 2.1, verticalCompression * 2.8), 0, 1);
+}
+
+function buildDesktopSeatLayout({ playerCount, stageRect, boardRect, stageTightness = 0 }) {
+  const layoutMetrics = getDesktopSeatLayoutMetrics({
+    playerCount,
+    stageRect,
+    boardRect,
+    stageTightness
+  });
+
+  if (!layoutMetrics) {
+    return [];
+  }
+
+  const tightZoomFactor = clampNumber(stageTightness, 0, 1);
+  const radiusX = Math.max(
+    Math.min(layoutMetrics.preferredRadiusX, layoutMetrics.maxRadiusX),
+    Math.min(layoutMetrics.minimumRadiusX, layoutMetrics.maxRadiusX)
+  );
+  const baseRadiusY = Math.max(
+    Math.min(layoutMetrics.preferredRadiusY, layoutMetrics.maxRadiusY),
+    Math.min(layoutMetrics.minimumRadiusY, layoutMetrics.maxRadiusY)
+  );
+  const expandedRadiusY = baseRadiusY + ((layoutMetrics.maxRadiusY - baseRadiusY) * (0.26 + (tightZoomFactor * 0.68)));
+  const symmetricRadiusY = clampNumber(
+    expandedRadiusY,
+    Math.min(layoutMetrics.minimumRadiusY, layoutMetrics.maxRadiusY),
+    layoutMetrics.maxRadiusY
+  );
+  const radiusYTop = clampNumber(
+    symmetricRadiusY + ((layoutMetrics.maxRadiusTop - symmetricRadiusY) * (0.72 + (tightZoomFactor * 0.18))),
+    Math.min(layoutMetrics.minimumRadiusY, layoutMetrics.maxRadiusTop),
+    layoutMetrics.maxRadiusTop
+  );
+  const radiusYBottom = clampNumber(
+    symmetricRadiusY + ((layoutMetrics.maxRadiusBottom - symmetricRadiusY) * (0.32 + (tightZoomFactor * 0.12))),
+    Math.min(layoutMetrics.minimumRadiusY, layoutMetrics.maxRadiusBottom),
+    layoutMetrics.maxRadiusBottom
+  );
+
+  return layoutMetrics.angles.map((angle) => {
+    const rawX = layoutMetrics.centerX + (Math.cos(angle) * radiusX);
+    const verticalRadius = Math.sin(angle) < 0 ? radiusYTop : radiusYBottom;
+    const rawY = layoutMetrics.centerY + (Math.sin(angle) * verticalRadius);
 
     return {
-      x: clampNumber(rawX, padding.left, stageRect.width - padding.right),
-      y: clampNumber(rawY, padding.top, stageRect.height - padding.bottom),
+      x: clampNumber(rawX, layoutMetrics.padding.left, stageRect.width - layoutMetrics.padding.right),
+      y: clampNumber(rawY, layoutMetrics.padding.top, stageRect.height - layoutMetrics.padding.bottom),
       angle
     };
   });
@@ -409,8 +504,9 @@ function Card({ cardString, onClick, disabled, ghosted = false, compact = false,
   return (
     <button
       type="button"
-      onClick={disabled ? undefined : onClick}
-      disabled={disabled}
+      onClick={onClick}
+      aria-disabled={disabled || undefined}
+      tabIndex={disabled ? -1 : (onClick ? 0 : -1)}
       title={title}
       aria-label={cardLabel}
       className={clsx(
@@ -537,6 +633,9 @@ function RentzSeatCluster({
   seatRole = 'top',
   isCurrent = false,
   isWinner = false,
+  isLocal = false,
+  showElo = true,
+  showStats = true,
   cardCount = 0,
   tricksWon = 0,
   points = null,
@@ -565,7 +664,9 @@ function RentzSeatCluster({
         />
       )}
 
-      <div className="rentz-seat-name">{getPlayerName(player)}</div>
+      <div className="rentz-seat-name">
+        {getPlayerName(player)} {isLocal ? '(You)' : ''}
+      </div>
 
       <div className="rentz-avatar-wrap">
         <button
@@ -593,27 +694,31 @@ function RentzSeatCluster({
             <div className="rentz-avatar-fallback">{getPlayerInitials(player)}</div>
           )}
 
-          <div className="rentz-elo-badge">
-            <Trophy className="h-3 w-3" />
-            <span>{rating == null ? 'ELO --' : `ELO ${rating}`}</span>
-          </div>
+          {showElo && (
+            <div className="rentz-elo-badge">
+              <Trophy className="h-3 w-3" />
+              <span>{rating == null ? 'ELO --' : `ELO ${rating}`}</span>
+            </div>
+          )}
         </div>
       </div>
 
-      <div className="rentz-seat-stats">
-        <div className="rentz-seat-stat">
-          <span className="rentz-seat-stat-value">{tricksWon}</span>
-          <span className="rentz-seat-stat-label">hands</span>
+      {showStats && (
+        <div className="rentz-seat-stats">
+          <div className="rentz-seat-stat">
+            <span className="rentz-seat-stat-value">{tricksWon}</span>
+            <span className="rentz-seat-stat-label">hands</span>
+          </div>
+          <div className="rentz-seat-stat">
+            <span className="rentz-seat-stat-value">{formatMetaValue(points)}</span>
+            <span className="rentz-seat-stat-label">points</span>
+          </div>
+          <div className="rentz-seat-stat">
+            <span className="rentz-seat-stat-value">{cardCount}</span>
+            <span className="rentz-seat-stat-label">cards</span>
+          </div>
         </div>
-        <div className="rentz-seat-stat">
-          <span className="rentz-seat-stat-value">{formatMetaValue(points)}</span>
-          <span className="rentz-seat-stat-label">points</span>
-        </div>
-        <div className="rentz-seat-stat">
-          <span className="rentz-seat-stat-value">{cardCount}</span>
-          <span className="rentz-seat-stat-label">cards</span>
-        </div>
-      </div>
+      )}
     </article>
   );
 }
@@ -641,6 +746,47 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
         title={isConnected ? 'Present in room' : 'Not currently connected'}
       />
     </div>
+  );
+}
+
+function DesktopPlayerCard({ player, isCurrent, isLocal, cardCount, tricksWon, points }) {
+  const rating = getPlayerRating(player);
+  const isConnected = getPlayerPresence(player);
+  const avatarSource = getPlayerAvatarSource(player);
+
+  return (
+    <article className={clsx('rentz-desktop-player-card', isCurrent && 'is-current', isLocal && 'is-local')}>
+      <div className="rentz-desktop-player-card-top">
+        <div className="rentz-desktop-player-card-avatar">
+          {avatarSource ? (
+            <img
+              src={avatarSource}
+              alt={`${getPlayerName(player)} avatar`}
+              className="rentz-desktop-player-card-avatar-image"
+            />
+          ) : (
+            <div className="rentz-desktop-player-card-avatar-fallback">{getPlayerInitials(player)}</div>
+          )}
+        </div>
+        <div className="rentz-desktop-player-card-copy">
+          <div className="rentz-desktop-player-card-name">
+            {getPlayerName(player)} {isLocal ? '(You)' : ''}
+          </div>
+          <div className="rentz-desktop-player-card-rating">
+            {rating == null ? 'ELO --' : `ELO ${rating}`} <span aria-hidden="true">★</span>
+          </div>
+          <div className="rentz-desktop-player-card-stats">
+            <span>{cardCount} cards</span>
+            <span>{tricksWon} hands</span>
+            <span>{formatMetaValue(points)} pts</span>
+          </div>
+        </div>
+        <span
+          className={clsx('rentz-player-row-presence', isConnected ? 'is-online' : 'is-offline')}
+          title={isConnected ? 'Present in room' : 'Not currently connected'}
+        />
+      </div>
+    </article>
   );
 }
 
@@ -824,10 +970,13 @@ function App() {
   const [topPrompts, setTopPrompts] = useState([]);
   const [isSpectatorPopoverOpen, setIsSpectatorPopoverOpen] = useState(false);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
+  const [desktopStageTightness, setDesktopStageTightness] = useState(0);
   const [handSpreadMetrics, setHandSpreadMetrics] = useState(null);
   const [hoveredCardIndex, setHoveredCardIndex] = useState(null);
   const [pendingPlayCard, setPendingPlayCard] = useState(null);
   const topPromptTimeoutsRef = useRef(new Map());
+  const gameEventTimeoutsRef = useRef(new Set());
+  const latestGameStateVersionRef = useRef(0);
   const startingHandSizeRef = useRef(0);
   const tableStageRef = useRef(null);
   const cardBoardRef = useRef(null);
@@ -896,6 +1045,45 @@ function App() {
 
   useEffect(() => {
     const promptTimeouts = topPromptTimeoutsRef.current;
+    const gameEventTimeouts = gameEventTimeoutsRef.current;
+
+    const clearScheduledGameEventTimeouts = () => {
+      gameEventTimeouts.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      gameEventTimeouts.clear();
+    };
+
+    const registerGameStateVersion = (nextVersion, { reset = false } = {}) => {
+      if (typeof nextVersion !== 'number') {
+        if (reset) {
+          latestGameStateVersionRef.current = 0;
+        }
+        return latestGameStateVersionRef.current;
+      }
+
+      latestGameStateVersionRef.current = reset
+        ? nextVersion
+        : Math.max(latestGameStateVersionRef.current, nextVersion);
+
+      return latestGameStateVersionRef.current;
+    };
+
+    const scheduleVersionedGameStateUpdate = (stateVersion, callback) => {
+      registerGameStateVersion(stateVersion);
+
+      const timeoutId = window.setTimeout(() => {
+        gameEventTimeouts.delete(timeoutId);
+
+        if (typeof stateVersion === 'number' && stateVersion < latestGameStateVersionRef.current) {
+          return;
+        }
+
+        callback();
+      }, 1050);
+
+      gameEventTimeouts.add(timeoutId);
+    };
 
     socket.connect();
 
@@ -905,12 +1093,15 @@ function App() {
       setLobbyHostId(nextHostId || '');
     });
 
-    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands }) => {
+    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, stateVersion }) => {
+      clearScheduledGameEventTimeouts();
+      registerGameStateVersion(stateVersion, { reset: true });
       const resolvedHand = nextHand || [];
       startingHandSizeRef.current = resolvedHand.length;
       setGameStarted(true);
       setIsSpectatingGame(Boolean(isSpectator));
       setGameFinished(false);
+      setTrickPending(false);
       setPlayView('table');
       setHand(resolvedHand);
       setStartingHandSize(resolvedHand.length);
@@ -920,15 +1111,21 @@ function App() {
       setCardCounts(nextCardCounts || {});
       setCollectedHandsByPlayer(nextCollectedHands || {});
       setCurrentTrick([]);
+      setPendingPlayCard(null);
+      setAnimatingWinner(null);
       setTrickWinnerId(null);
       setActivityFeed([]);
       setFinalStandings([]);
     });
 
-    socket.on('game_update', ({ currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts }) => {
+    socket.on('game_update', ({ currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts, stateVersion }) => {
+      registerGameStateVersion(stateVersion);
       setCurrentTrick(nextTrick);
       setTurnIndex(nextTurnIndex);
       setTrickSuit(nextTrickSuit || null);
+      setTrickPending(false);
+      setAnimatingWinner(null);
+      setTrickWinnerId(null);
       if (nextCardCounts) {
         setCardCounts(nextCardCounts);
       }
@@ -938,11 +1135,12 @@ function App() {
       setHand(nextHand);
     });
 
-    socket.on('trick_won', ({ winnerName, winnerId, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts }) => {
+    socket.on('trick_won', ({ winnerName, winnerId, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, stateVersion }) => {
+      registerGameStateVersion(stateVersion);
       setAnimatingWinner(winnerName);
       setTrickWinnerId(winnerId);
       setTrickPending(true);
-      const delayTimer1 = window.setTimeout(() => {
+      scheduleVersionedGameStateUpdate(stateVersion, () => {
         if (nextCollectedHands) {
           setCollectedHandsByPlayer(nextCollectedHands);
         }
@@ -950,12 +1148,11 @@ function App() {
           setCardCounts(nextCardCounts);
         }
         setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
-      }, 1050);
-      promptTimeouts.set(`trick_won_${Date.now()}`, delayTimer1);
+      });
     });
 
-    socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, gameFinished: finished }) => {
-      const delayTimer2 = window.setTimeout(() => {
+    socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, gameFinished: finished, stateVersion }) => {
+      scheduleVersionedGameStateUpdate(stateVersion, () => {
         setTurnIndex(nextTurnIndex);
         setCurrentTrick([]);
         setAnimatingWinner(null);
@@ -970,12 +1167,11 @@ function App() {
         if (nextCardCounts) {
           setCardCounts(nextCardCounts);
         }
-      }, 1050);
-      promptTimeouts.set(`trick_end_${Date.now()}`, delayTimer2);
+      });
     });
 
-    socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts }) => {
-      const delayTimer3 = window.setTimeout(() => {
+    socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, stateVersion }) => {
+      scheduleVersionedGameStateUpdate(stateVersion, () => {
         setGameFinished(true);
         setTrickPending(false);
         setTrickWinnerId(winnerId);
@@ -988,8 +1184,7 @@ function App() {
           setCardCounts(nextCardCounts);
         }
         setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
-      }, 1050);
-      promptTimeouts.set(`game_finished_${Date.now()}`, delayTimer3);
+      });
     });
 
     socket.on('game_error', (message) => {
@@ -1002,6 +1197,7 @@ function App() {
         window.clearTimeout(timeoutId);
       });
       promptTimeouts.clear();
+      clearScheduledGameEventTimeouts();
 
       socket.off('lobby_update');
       socket.off('game_started');
@@ -1356,6 +1552,7 @@ function App() {
 
     if (!isTableStageVisible || !stageElement || !boardElement || desktopSeatPlayers.length === 0) {
       setDesktopSeatLayout([]);
+      setDesktopStageTightness(0);
       return undefined;
     }
 
@@ -1368,10 +1565,19 @@ function App() {
         return;
       }
 
-      setDesktopSeatLayout(buildDesktopSeatLayout({
+      const nextStageTightness = getDesktopStageTightness({
         playerCount: desktopSeatPlayers.length,
         stageRect,
         boardRect
+      });
+
+      setDesktopStageTightness(nextStageTightness);
+
+      setDesktopSeatLayout(buildDesktopSeatLayout({
+        playerCount: desktopSeatPlayers.length,
+        stageRect,
+        boardRect,
+        stageTightness: nextStageTightness
       }));
     };
 
@@ -1809,123 +2015,147 @@ function App() {
 
     return (
       <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-        <section className="rentz-game-frame flex-1 min-h-0">
-          <div ref={tableStageRef} className="rentz-table-stage table-felt">
-            <div className="rentz-marking-box">
-              <span className="rentz-marking-label">Marking suit:</span>
-              <span
-                className={clsx(
-                  'rentz-marking-value',
-                  trickSuit && (trickSuit === 'H' || trickSuit === 'D') ? 'is-red' : 'is-neutral'
-                )}
-              >
-                {formatMarkingSuit(trickSuit)}
-              </span>
-            </div>
-
-            <div
-              ref={spectatorPopoverRef}
-              className={clsx('rentz-spectator-box', isSpectatorPopoverOpen && 'is-open')}
-            >
-              <button
-                type="button"
-                className="rentz-spectator-toggle"
-                onClick={() => setIsSpectatorPopoverOpen((current) => !current)}
-                aria-expanded={isSpectatorPopoverOpen}
-                aria-controls="rentz-spectator-popover"
-                title="View spectators"
-              >
-                <span className="rentz-spectator-label">
-                  <Users className="h-4 w-4" />
-                  Spectators
-                </span>
-                <span className="rentz-marking-value is-neutral">{spectators.length}</span>
-              </button>
-
-              {isSpectatorPopoverOpen && (
-                <div id="rentz-spectator-popover" className="rentz-spectator-popover">
-                  {spectators.length > 0 ? (
-                    spectators.map((spectator, index) => (
-                      <div
-                        key={spectator.userId || spectator.socketId || index}
-                        className="rentz-spectator-entry"
-                      >
-                        <div className="rentz-spectator-entry-avatar">
-                          {getPlayerInitials(spectator)}
-                        </div>
-                        <div className="rentz-spectator-entry-copy">
-                          <div className="rentz-spectator-entry-name">
-                            {getPlayerName(spectator)}{' '}
-                            {spectator.socketId === socket.id ? '(You)' : ''}
-                          </div>
-                          <div className="rentz-spectator-entry-meta">
-                            {spectator.userId === lobbyHostId ? 'Host spectating' : 'Watching the table'}
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  ) : (
-                    <div className="rentz-spectator-empty">No spectators right now.</div>
+        <section
+          className="rentz-game-frame flex-1 min-h-0"
+          style={{ '--rentz-stage-tightness': `${desktopStageTightness}` }}
+        >
+          <div className="rentz-desktop-stage">
+            <div className="rentz-table-stage table-felt">
+            <div ref={tableStageRef} className="rentz-table-main">
+              <div className="rentz-marking-box">
+                <span className="rentz-marking-label">Marking suit:</span>
+                <span
+                  className={clsx(
+                    'rentz-marking-value',
+                    trickSuit && (trickSuit === 'H' || trickSuit === 'D') ? 'is-red' : 'is-neutral'
                   )}
-                </div>
-              )}
-            </div>
+                >
+                  {formatMarkingSuit(trickSuit)}
+                </span>
+              </div>
 
-            <div className="rentz-table-brand">Rentz</div>
+              <div
+                ref={spectatorPopoverRef}
+                className={clsx('rentz-spectator-box', isSpectatorPopoverOpen && 'is-open')}
+              >
+                <button
+                  type="button"
+                  className="rentz-spectator-toggle"
+                  onClick={() => setIsSpectatorPopoverOpen((current) => !current)}
+                  aria-expanded={isSpectatorPopoverOpen}
+                  aria-controls="rentz-spectator-popover"
+                  title="View spectators"
+                >
+                  <span className="rentz-spectator-label">
+                    <Users className="h-4 w-4" />
+                    Spectators
+                  </span>
+                  <span className="rentz-marking-value is-neutral">{spectators.length}</span>
+                </button>
 
-            <div className="rentz-mobile-hero">
-              <div className="rentz-current-player-label">Current player:</div>
-              {nextTurnPlayer ? (
-                <RentzSeatCluster
-                  player={nextTurnPlayer}
-                  seatRole="hero"
-                  mobileHero
-                  isCurrent
-                  isWinner={trickWinnerId === nextTurnPlayer.userId}
-                  cardCount={nextTurnPlayer.userId === myPlayerId ? hand.length : (cardCounts[nextTurnPlayer.userId] || 0)}
-                  tricksWon={(collectedHandsByPlayer[nextTurnPlayer.userId] || []).length}
-                  points={getPlayerPoints(nextTurnPlayer)}
-                  onEmojiClick={() => handleEmojiPrompt(nextTurnPlayer)}
-                />
-              ) : null}
-            </div>
-
-            <div className="rentz-desktop-seats">
-              {desktopSeatPlayers.map((player, index) => {
-                const seatPosition = desktopSeatLayout[index];
-
-                if (!seatPosition) {
-                  return null;
-                }
-
-                return (
-                  <div
-                    key={player.userId || player.socketId || index}
-                    className={clsx('rentz-seat-slot', player.userId === myPlayerId && 'is-local')}
-                    style={{ left: `${seatPosition.x}px`, top: `${seatPosition.y}px` }}
-                  >
-                    <RentzSeatCluster
-                      player={player}
-                      seatRole="table"
-                      isCurrent={nextTurnPlayer?.userId === player.userId}
-                      isWinner={trickWinnerId === player.userId}
-                      cardCount={player.userId === myPlayerId ? hand.length : (cardCounts[player.userId] || 0)}
-                      tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
-                      points={getPlayerPoints(player)}
-                      onEmojiClick={() => handleEmojiPrompt(player)}
-                    />
+                {isSpectatorPopoverOpen && (
+                  <div id="rentz-spectator-popover" className="rentz-spectator-popover">
+                    {spectators.length > 0 ? (
+                      spectators.map((spectator, index) => (
+                        <div
+                          key={spectator.userId || spectator.socketId || index}
+                          className="rentz-spectator-entry"
+                        >
+                          <div className="rentz-spectator-entry-avatar">
+                            {getPlayerInitials(spectator)}
+                          </div>
+                          <div className="rentz-spectator-entry-copy">
+                            <div className="rentz-spectator-entry-name">
+                              {getPlayerName(spectator)}{' '}
+                              {spectator.socketId === socket.id ? '(You)' : ''}
+                            </div>
+                            <div className="rentz-spectator-entry-meta">
+                              {spectator.userId === lobbyHostId ? 'Host spectating' : 'Watching the table'}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="rentz-spectator-empty">No spectators right now.</div>
+                    )}
                   </div>
-                );
-              })}
+                )}
+              </div>
+
+              <div className="rentz-table-brand">Rentz</div>
+
+              <div className="rentz-mobile-hero">
+                <div className="rentz-current-player-label">Current player:</div>
+                {nextTurnPlayer ? (
+                  <RentzSeatCluster
+                    player={nextTurnPlayer}
+                    seatRole="hero"
+                    mobileHero
+                    isCurrent
+                    isWinner={trickWinnerId === nextTurnPlayer.userId}
+                    isLocal={nextTurnPlayer.userId === myPlayerId}
+                    cardCount={nextTurnPlayer.userId === myPlayerId ? hand.length : (cardCounts[nextTurnPlayer.userId] || 0)}
+                    tricksWon={(collectedHandsByPlayer[nextTurnPlayer.userId] || []).length}
+                    points={getPlayerPoints(nextTurnPlayer)}
+                    onEmojiClick={() => handleEmojiPrompt(nextTurnPlayer)}
+                  />
+                ) : null}
+              </div>
+
+              <div className="rentz-desktop-seats">
+                {desktopSeatPlayers.map((player, index) => {
+                  const seatPosition = desktopSeatLayout[index];
+
+                  if (!seatPosition) {
+                    return null;
+                  }
+
+                  return (
+                    <div
+                      key={player.userId || player.socketId || index}
+                      className={clsx('rentz-seat-slot', player.userId === myPlayerId && 'is-local')}
+                      style={{ left: `${seatPosition.x}px`, top: `${seatPosition.y}px` }}
+                    >
+                      <RentzSeatCluster
+                        player={player}
+                        seatRole="table"
+                        isCurrent={nextTurnPlayer?.userId === player.userId}
+                        isWinner={trickWinnerId === player.userId}
+                        isLocal={player.userId === myPlayerId}
+                        showElo={false}
+                        showStats={false}
+                        onEmojiClick={() => handleEmojiPrompt(player)}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="rentz-board-area">
+                <TrickBoard
+                  boardRef={cardBoardRef}
+                  currentTrick={currentTrick}
+                  trickPending={trickPending || Boolean(animatingWinner)}
+                  trickWinnerId={trickWinnerId}
+                />
+              </div>
+            </div>
             </div>
 
-            <div className="rentz-board-area">
-              <TrickBoard
-                boardRef={cardBoardRef}
-                currentTrick={currentTrick}
-                trickPending={trickPending || Boolean(animatingWinner)}
-                trickWinnerId={trickWinnerId}
-              />
+            <div className="rentz-desktop-sidebar">
+              <div className="rentz-desktop-player-list">
+                {playersForMobilePanel.map((player, index) => (
+                  <DesktopPlayerCard
+                    key={player.userId || player.socketId || index}
+                    player={player}
+                    isCurrent={nextTurnPlayer?.userId === player.userId}
+                    isLocal={player.userId === myPlayerId}
+                    cardCount={player.userId === myPlayerId ? hand.length : (cardCounts[player.userId] || 0)}
+                    tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
+                    points={getPlayerPoints(player)}
+                  />
+                ))}
+              </div>
             </div>
           </div>
 
@@ -2032,8 +2262,13 @@ function App() {
                           <Card
                             cardString={card}
                             onClick={() => {
-                              if (disabled) return;
                               const isMobileDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches || window.innerWidth < 1024;
+                              if (disabled) {
+                                if (isMobileDevice) {
+                                  setPendingPlayCard(null);
+                                }
+                                return;
+                              }
                               if (isMobileDevice) {
                                 setPendingPlayCard(card);
                               } else {
@@ -2102,6 +2337,7 @@ function App() {
                 )}
               </div>
             </section>
+
           </div>
 
           <div className="rentz-mobile-panels">
