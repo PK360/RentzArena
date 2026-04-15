@@ -2,6 +2,11 @@ const Game = require('./models/Game');
 const User = require('./models/User');
 const { randomFriendCode } = require('./utils/helpers');
 const { generateDeck, shuffle, dealCards } = require('./utils/cards');
+const {
+  buildRuleSnapshot,
+  compileRuleset,
+  evaluateRuleWithSnapshot
+} = require('./engine/evaluator');
 
 // In-memory lobby management
 const lobbies = new Map(); // roomId -> Set(socketIds)
@@ -15,10 +20,102 @@ const SUIT_NAMES = {
   C: 'Clubs',
   S: 'Spades'
 };
+const ROOM_RULESET_DEFINITIONS = Object.freeze({
+  kingOfHearts: {
+    id: 'kingOfHearts',
+    label: 'King of Hearts',
+    type: 'per_round',
+    code: `
+if(HEART_KING)
+  add(-100)
+  game_end()
+endif
+`.trim()
+  },
+  queens: {
+    id: 'queens',
+    label: 'Queens',
+    type: 'per_round',
+    code: `
+add(-30 * Q_NR, Q_NR > 0)
+if(TOTAL_Q_NR == 0)
+  game_end()
+endif
+`.trim()
+  },
+  diamonds: {
+    id: 'diamonds',
+    label: 'Diamonds',
+    type: 'per_round',
+    code: `
+add(-15 * DIAMOND_NR, DIAMOND_NR > 0)
+if(TOTAL_DIAMOND_NR == 0)
+  game_end()
+endif
+`.trim()
+  },
+  tenOfClubs: {
+    id: 'tenOfClubs',
+    label: '10 of Clubs',
+    type: 'per_round',
+    code: `
+if(CLUB_TEN)
+  add(-50)
+  game_end()
+endif
+`.trim()
+  },
+  whist: {
+    id: 'whist',
+    label: 'Whist',
+    type: 'per_round',
+    code: 'add(10)'
+  }
+});
+const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
+  Object.keys(ROOM_RULESET_DEFINITIONS).reduce((acc, key) => {
+    acc[key] = true;
+    return acc;
+  }, {})
+);
+const COMPILED_ROOM_RULESETS = Object.freeze(
+  Object.fromEntries(
+    Object.entries(ROOM_RULESET_DEFINITIONS).map(([key, definition]) => [
+      key,
+      {
+        ...definition,
+        compiled: compileRuleset(definition.code, definition.type)
+      }
+    ])
+  )
+);
+
+function sanitizeRoomRulesetSelections(nextSelections = {}) {
+  return Object.keys(DEFAULT_ROOM_RULESET_SELECTIONS).reduce((acc, key) => {
+    acc[key] = typeof nextSelections[key] === 'boolean'
+      ? nextSelections[key]
+      : DEFAULT_ROOM_RULESET_SELECTIONS[key];
+    return acc;
+  }, {});
+}
+
+function serializeRoomSettings(lobby) {
+  return {
+    availableRulesets: Object.values(ROOM_RULESET_DEFINITIONS).map(({ id, label }) => ({ id, label })),
+    selectedRulesets: sanitizeRoomRulesetSelections(lobby?.selectedRulesets)
+  };
+}
 
 function buildCardCounts(game) {
   return game.players.reduce((acc, player) => {
     acc[player.userId] = game.handsReady[player.userId].length;
+    return acc;
+  }, {});
+}
+
+function buildPointTotals(game) {
+  return game.players.reduce((acc, player) => {
+    acc[player.userId] = game.pointsByPlayer?.[player.userId] || 0;
     return acc;
   }, {});
 }
@@ -35,10 +132,15 @@ function buildStandings(game) {
     .map((player) => ({
       userId: player.userId,
       name: player.name,
+      points: game.pointsByPlayer?.[player.userId] || 0,
       tricksWon: (game.collectedByPlayer[player.userId] || []).length,
       cardsLeft: game.handsReady[player.userId].length
     }))
     .sort((left, right) => {
+      if (right.points !== left.points) {
+        return right.points - left.points;
+      }
+
       if (right.tricksWon !== left.tricksWon) {
         return right.tricksWon - left.tricksWon;
       }
@@ -67,6 +169,7 @@ function serializeLobby(lobby) {
     players: lobby.players,
     spectators: lobby.spectators,
     rulesetId: lobby.rulesetId,
+    roomSettings: serializeRoomSettings(lobby),
     status: lobby.status
   };
 }
@@ -180,6 +283,41 @@ function getStartGameValidationError(lobby, user) {
   return null;
 }
 
+function applySelectedRoomRulesToHand({ game, playerId, handCards }) {
+  const enabledRuleIds = Object.entries(sanitizeRoomRulesetSelections(game.selectedRulesets))
+    .filter(([, isEnabled]) => isEnabled)
+    .map(([ruleId]) => ruleId)
+    .filter((ruleId) => COMPILED_ROOM_RULESETS[ruleId]);
+
+  if (enabledRuleIds.length === 0) {
+    return { gameEnded: false };
+  }
+
+  const nonDiscardedCards = game.players.flatMap((player) => game.handsReady[player.userId] || []);
+  let nextPoints = game.pointsByPlayer[playerId] || 0;
+  let gameEnded = false;
+
+  for (const ruleId of enabledRuleIds) {
+    const result = evaluateRuleWithSnapshot(
+      COMPILED_ROOM_RULESETS[ruleId].compiled,
+      buildRuleSnapshot({
+        playerCount: game.players.length,
+        initialPoints: nextPoints,
+        handCards,
+        nonDiscardedCards
+      })
+    );
+
+    nextPoints = result.POINTS;
+    if (result.gameEnded) {
+      gameEnded = true;
+    }
+  }
+
+  game.pointsByPlayer[playerId] = nextPoints;
+  return { gameEnded };
+}
+
 function attachSocketManager(io) {
   io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
@@ -206,6 +344,7 @@ function attachSocketManager(io) {
         players: [createLobbyMember(user, socket.id, { isReady: true, role: 'player' })],
         spectators: [],
         rulesetId: rulesetId || null,
+        selectedRulesets: { ...DEFAULT_ROOM_RULESET_SELECTIONS },
         status: 'waiting'
       });
 
@@ -274,6 +413,20 @@ function attachSocketManager(io) {
       });
     });
 
+    socket.on('update_room_settings', ({ roomId, selectedRulesets }, callback = () => {}) => {
+      const lobby = lobbies.get(roomId);
+      const user = socketToUser.get(socket.id);
+
+      if (!lobby) return callback({ error: 'Lobby not found' });
+      if (!user) return callback({ error: 'Not authenticated' });
+      if (lobby.status !== 'waiting') return callback({ error: 'Room settings can only be changed before the match starts' });
+      if (lobby.hostId !== user.userId) return callback({ error: 'Only the host can change room settings' });
+
+      lobby.selectedRulesets = sanitizeRoomRulesetSelections(selectedRulesets);
+      emitLobbyUpdate(io, roomId, lobby);
+      callback({ success: true, lobby: serializeLobby(lobby) });
+    });
+
     // 4. Start Game
     socket.on('start_game', async ({ roomId }, callback) => {
       const lobby = lobbies.get(roomId);
@@ -294,6 +447,7 @@ function attachSocketManager(io) {
         roomId,
         hostId: lobby.hostId,
         rulesetId: lobby.rulesetId,
+        selectedRulesets: sanitizeRoomRulesetSelections(lobby.selectedRulesets),
         players: lobby.players.map(p => ({
           userId: p.userId,
           socketId: p.socketId,
@@ -307,6 +461,10 @@ function attachSocketManager(io) {
         currentTrick: [], // cards played this round
         trickSuit: null,
         collectedHands: [], // History of hands collected
+        pointsByPlayer: playerIds.reduce((acc, playerId) => {
+          acc[playerId] = 0;
+          return acc;
+        }, {}),
         collectedByPlayer: playerIds.reduce((acc, playerId) => {
           acc[playerId] = [];
           return acc;
@@ -349,6 +507,7 @@ function attachSocketManager(io) {
             trickSuit: null,
             stateVersion: gameStartedVersion,
             cardCounts: buildCardCounts(gameState),
+            playerPoints: buildPointTotals(gameState),
             collectedHandsByPlayer: buildCollectedHands(gameState)
           });
         });
@@ -363,6 +522,7 @@ function attachSocketManager(io) {
             trickSuit: null,
             stateVersion: gameStartedVersion,
             cardCounts: buildCardCounts(gameState),
+            playerPoints: buildPointTotals(gameState),
             collectedHandsByPlayer: buildCollectedHands(gameState)
           });
         });
@@ -462,6 +622,12 @@ function attachSocketManager(io) {
         const winningPlay = game.currentTrick[winnerIndex];
         game.collectedHands.push(game.currentTrick);
         game.collectedByPlayer[winningPlay.playedBy].push([...game.currentTrick]);
+        const collectedHandCards = game.currentTrick.map((play) => play.card);
+        const ruleResolution = applySelectedRoomRulesToHand({
+          game,
+          playerId: winningPlay.playedBy,
+          handCards: collectedHandCards
+        });
         
         // Trick winner goes first next round
         game.turnIndex = game.players.findIndex(p => p.userId === winningPlay.playedBy);
@@ -472,6 +638,7 @@ function attachSocketManager(io) {
            winnerId: winningPlay.playedBy,
            trickSuit: game.trickSuit,
            stateVersion: trickWonVersion,
+           playerPoints: buildPointTotals(game),
            collectedHandsByPlayer: buildCollectedHands(game),
            cardCounts: buildCardCounts(game)
         });
@@ -483,6 +650,7 @@ function attachSocketManager(io) {
           const allHandsEmpty = game.players.every(
             (player) => game.handsReady[player.userId].length === 0
           );
+          const gameShouldFinish = allHandsEmpty || ruleResolution.gameEnded;
           const trickEndVersion = bumpGameStateVersion(game);
           
           io.to(roomId).emit('trick_end', {
@@ -490,20 +658,23 @@ function attachSocketManager(io) {
             collectedHandsCount: game.collectedHands.length,
             trickSuit: null,
             stateVersion: trickEndVersion,
+            playerPoints: buildPointTotals(game),
             collectedHandsByPlayer: buildCollectedHands(game),
             cardCounts: buildCardCounts(game),
-            gameFinished: allHandsEmpty
+            gameFinished: gameShouldFinish
           });
 
-          if (allHandsEmpty) {
+          if (gameShouldFinish) {
             game.status = 'finished';
             const gameFinishedVersion = bumpGameStateVersion(game);
+            const standings = buildStandings(game);
 
             io.to(roomId).emit('game_finished', {
-              winnerId: winningPlay.playedBy,
-              winnerName: winningPlay.playerName,
+              winnerId: standings[0]?.userId || winningPlay.playedBy,
+              winnerName: standings[0]?.name || winningPlay.playerName,
               stateVersion: gameFinishedVersion,
-              standings: buildStandings(game),
+              standings,
+              playerPoints: buildPointTotals(game),
               collectedHandsByPlayer: buildCollectedHands(game),
               cardCounts: buildCardCounts(game)
             });

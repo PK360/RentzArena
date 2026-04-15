@@ -1099,13 +1099,11 @@
       0 5px 12px rgba(0,0,0,0.24);
   }
 
-  .rentz-presence-dot.is-online,
-  .rentz-player-row-presence.is-online {
+  .rentz-presence-dot.is-online {
     background: linear-gradient(180deg, #7cff74 0%, #31c73b 100%);
   }
 
-  .rentz-presence-dot.is-offline,
-  .rentz-player-row-presence.is-offline {
+  .rentz-presence-dot.is-offline {
     background: linear-gradient(180deg, #d9dee7 0%, #8998ae 100%);
   }
 
@@ -1572,14 +1570,6 @@
     letter-spacing: 0.08em;
     margin-top: 0.2rem;
     text-transform: uppercase;
-  }
-
-  .rentz-player-row-presence {
-    height: 0.95rem;
-    width: 0.95rem;
-    border: 2px solid rgba(255,255,255,0.92);
-    border-radius: 999px;
-    box-shadow: 0 0 0 1px rgba(18,23,31,0.45);
   }
 
   .rentz-desktop-player-card {

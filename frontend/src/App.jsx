@@ -89,6 +89,19 @@ const HAND_CARD_MAX_ADVANCE_RATIO = 0.76;
 const HAND_CARD_SIZE_SCALE = 0.95;
 const MIN_PLAYERS_TO_START = 2;
 const MAX_ACTIVE_PLAYERS = 6;
+const ROOM_RULESET_OPTIONS = [
+  { id: 'kingOfHearts', label: 'King of Hearts' },
+  { id: 'queens', label: 'Queens' },
+  { id: 'diamonds', label: 'Diamonds' },
+  { id: 'tenOfClubs', label: '10 of Clubs' },
+  { id: 'whist', label: 'Whist' }
+];
+const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
+  ROOM_RULESET_OPTIONS.reduce((acc, option) => {
+    acc[option.id] = true;
+    return acc;
+  }, {})
+);
 
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
@@ -118,6 +131,22 @@ function getStepAlignedMidpoint(min, max, step) {
 
 function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function normalizeRoomSettings(roomSettings) {
+  const selectedRulesets = ROOM_RULESET_OPTIONS.reduce((acc, option) => {
+    acc[option.id] = typeof roomSettings?.selectedRulesets?.[option.id] === 'boolean'
+      ? roomSettings.selectedRulesets[option.id]
+      : DEFAULT_ROOM_RULESET_SELECTIONS[option.id];
+    return acc;
+  }, {});
+
+  return {
+    availableRulesets: roomSettings?.availableRulesets?.length
+      ? roomSettings.availableRulesets
+      : ROOM_RULESET_OPTIONS,
+    selectedRulesets
+  };
 }
 
 function hashString(value) {
@@ -725,7 +754,6 @@ function RentzSeatCluster({
 
 function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, points }) {
   const rating = getPlayerRating(player);
-  const isConnected = getPlayerPresence(player);
 
   return (
     <div data-seat-player-id={player?.userId} className={clsx('rentz-player-row', isCurrent && 'is-current')}>
@@ -741,17 +769,12 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
           <span>{formatMetaValue(points)} pts</span>
         </div>
       </div>
-      <span
-        className={clsx('rentz-player-row-presence', isConnected ? 'is-online' : 'is-offline')}
-        title={isConnected ? 'Present in room' : 'Not currently connected'}
-      />
     </div>
   );
 }
 
 function DesktopPlayerCard({ player, isCurrent, isLocal, cardCount, tricksWon, points }) {
   const rating = getPlayerRating(player);
-  const isConnected = getPlayerPresence(player);
   const avatarSource = getPlayerAvatarSource(player);
 
   return (
@@ -781,10 +804,6 @@ function DesktopPlayerCard({ player, isCurrent, isLocal, cardCount, tricksWon, p
             <span>{formatMetaValue(points)} pts</span>
           </div>
         </div>
-        <span
-          className={clsx('rentz-player-row-presence', isConnected ? 'is-online' : 'is-offline')}
-          title={isConnected ? 'Present in room' : 'Not currently connected'}
-        />
       </div>
     </article>
   );
@@ -945,6 +964,9 @@ function App() {
   const [players, setPlayers] = useState([]);
   const [spectators, setSpectators] = useState([]);
   const [lobbyHostId, setLobbyHostId] = useState('');
+  const [roomSettings, setRoomSettings] = useState(() => normalizeRoomSettings());
+  const [draftRoomRulesets, setDraftRoomRulesets] = useState(() => ({ ...DEFAULT_ROOM_RULESET_SELECTIONS }));
+  const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [guestProfile, setGuestProfile] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1093,7 +1115,7 @@ function App() {
       setLobbyHostId(nextHostId || '');
     });
 
-    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, stateVersion }) => {
+    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, stateVersion }) => {
       clearScheduledGameEventTimeouts();
       registerGameStateVersion(stateVersion, { reset: true });
       const resolvedHand = nextHand || [];
@@ -1116,6 +1138,7 @@ function App() {
       setTrickWinnerId(null);
       setActivityFeed([]);
       setFinalStandings([]);
+      applyPlayerPoints(nextPlayerPoints);
     });
 
     socket.on('game_update', ({ currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts, stateVersion }) => {
@@ -1135,7 +1158,7 @@ function App() {
       setHand(nextHand);
     });
 
-    socket.on('trick_won', ({ winnerName, winnerId, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, stateVersion }) => {
+    socket.on('trick_won', ({ winnerName, winnerId, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
       registerGameStateVersion(stateVersion);
       setAnimatingWinner(winnerName);
       setTrickWinnerId(winnerId);
@@ -1147,11 +1170,12 @@ function App() {
         if (nextCardCounts) {
           setCardCounts(nextCardCounts);
         }
+        applyPlayerPoints(nextPlayerPoints);
         setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       });
     });
 
-    socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, gameFinished: finished, stateVersion }) => {
+    socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, gameFinished: finished, stateVersion }) => {
       scheduleVersionedGameStateUpdate(stateVersion, () => {
         setTurnIndex(nextTurnIndex);
         setCurrentTrick([]);
@@ -1167,10 +1191,11 @@ function App() {
         if (nextCardCounts) {
           setCardCounts(nextCardCounts);
         }
+        applyPlayerPoints(nextPlayerPoints);
       });
     });
 
-    socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, stateVersion }) => {
+    socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
       scheduleVersionedGameStateUpdate(stateVersion, () => {
         setGameFinished(true);
         setTrickPending(false);
@@ -1183,6 +1208,7 @@ function App() {
         if (nextCardCounts) {
           setCardCounts(nextCardCounts);
         }
+        applyPlayerPoints(nextPlayerPoints);
         setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       });
     });
@@ -1250,10 +1276,26 @@ function App() {
     topPromptTimeoutsRef.current.set(promptId, timeoutId);
   };
 
+  const applyPlayerPoints = (playerPoints) => {
+    if (!playerPoints || typeof playerPoints !== 'object') {
+      return;
+    }
+
+    setPlayers((current) => current.map((player) => ({
+      ...player,
+      points: Object.prototype.hasOwnProperty.call(playerPoints, player.userId)
+        ? playerPoints[player.userId]
+        : (player.points ?? 0)
+    })));
+  };
+
   const applyLobbyState = (lobby) => {
     setPlayers(lobby?.players || []);
     setSpectators(lobby?.spectators || []);
     setLobbyHostId(lobby?.hostId || '');
+    const nextRoomSettings = normalizeRoomSettings(lobby?.roomSettings);
+    setRoomSettings(nextRoomSettings);
+    setDraftRoomRulesets({ ...nextRoomSettings.selectedRulesets });
   };
 
   const showErrorMessage = (message) => {
@@ -1444,6 +1486,34 @@ function App() {
     });
   };
 
+  const handleOpenRoomSettings = () => {
+    setDraftRoomRulesets({ ...roomSettings.selectedRulesets });
+    setIsRoomSettingsOpen(true);
+  };
+
+  const handleRoomRulesetToggle = (ruleId) => {
+    setDraftRoomRulesets((current) => ({
+      ...current,
+      [ruleId]: !current[ruleId]
+    }));
+  };
+
+  const handleSaveRoomSettings = () => {
+    socket.emit('update_room_settings', { roomId, selectedRulesets: draftRoomRulesets }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+
+      setIsRoomSettingsOpen(false);
+      showTopPrompt('Room settings updated.', 'success');
+    });
+  };
+
   const startGame = () => {
     if (players.length < MIN_PLAYERS_TO_START) {
       showTopPrompt(`At least ${MIN_PLAYERS_TO_START} active players are required to start the game.`, 'error');
@@ -1496,6 +1566,9 @@ function App() {
   const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending);
   const activeSeatsRemaining = Math.max(0, MAX_ACTIVE_PLAYERS - players.length);
   const areActiveSeatsFull = players.length >= MAX_ACTIVE_PLAYERS;
+  const selectedRoomRuleLabels = roomSettings.availableRulesets
+    .filter((option) => roomSettings.selectedRulesets[option.id])
+    .map((option) => option.label);
   const playableCards = hand.reduce((acc, card) => {
     acc[card] = canPlayCard({
       card,
@@ -1506,6 +1579,12 @@ function App() {
     });
     return acc;
   }, {});
+
+  useEffect(() => {
+    if (!inLobby || gameStarted || !amIHost) {
+      setIsRoomSettingsOpen(false);
+    }
+  }, [amIHost, gameStarted, inLobby]);
 
   useEffect(() => {
     if (pendingPlayCard && !playableCards[pendingPlayCard]) {
@@ -1829,6 +1908,30 @@ function App() {
                   : `There ${activeSeatsRemaining === 1 ? 'is' : 'are'} ${activeSeatsRemaining} open player seat${activeSeatsRemaining === 1 ? '' : 's'} right now.`)
                 : 'Ready up when you want to be included in the next match.'}
             </p>
+          </div>
+
+          <div className="mb-4 rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-4">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+              Room rules
+            </div>
+            <div className="mt-2 text-base font-black text-[var(--text-primary)]">
+              {selectedRoomRuleLabels.length > 0 ? selectedRoomRuleLabels.join(', ') : 'No rules selected'}
+            </div>
+            <p className="mt-2 text-sm font-semibold leading-6 text-[var(--text-secondary)]">
+              {amIHost
+                ? 'You can change these before the match starts.'
+                : 'Only the host can change the room rule selection.'}
+            </p>
+            {amIHost && !gameStarted && (
+              <button
+                type="button"
+                onClick={handleOpenRoomSettings}
+                className="mt-3 inline-flex items-center gap-2 rounded-[1.1rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+              >
+                <Settings className="h-4 w-4" />
+                Room Settings
+              </button>
+            )}
           </div>
 
           <div className="flex flex-col gap-3">
@@ -2914,6 +3017,75 @@ endif`}
           </main>
         </div>
       </div>
+
+      {isRoomSettingsOpen && (
+        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[rgba(7,18,32,0.34)] px-4 backdrop-blur-sm">
+          <div className="glass-panel w-full max-w-[34rem] rounded-[2rem] p-5 sm:p-6">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                  Host controls
+                </div>
+                <h3 className="mt-2 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">
+                  Room Settings
+                </h3>
+                <p className="mt-2 text-sm font-semibold leading-6 text-[var(--text-secondary)]">
+                  Choose which custom room rules are active before the match starts.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRoomSettingsOpen(false)}
+                className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] p-2 text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+                title="Close room settings"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-3">
+              {roomSettings.availableRulesets.map((option) => (
+                <label
+                  key={option.id}
+                  className="flex cursor-pointer items-center justify-between gap-4 rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3.5 transition hover:bg-[var(--surface-hover)]"
+                >
+                  <div>
+                    <div className="text-base font-black text-[var(--text-primary)]">
+                      {option.label}
+                    </div>
+                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                      Enabled for this room
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(draftRoomRulesets[option.id])}
+                    onChange={() => handleRoomRulesetToggle(option.id)}
+                    className="h-5 w-5 accent-emerald-500"
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setIsRoomSettingsOpen(false)}
+                className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveRoomSettings}
+                className="frutiger-button px-5 py-3 text-sm uppercase tracking-[0.14em]"
+              >
+                Save room settings
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <nav className="mobile-tab-bar fixed bottom-3 left-2 right-2 z-50 sm:bottom-4 sm:left-3 sm:right-3 md:hidden">
         <div className="glass-panel overflow-x-auto rounded-[1.9rem] border border-[var(--glass-border)] p-2 shadow-[0_20px_40px_rgba(0,0,0,0.2)]">

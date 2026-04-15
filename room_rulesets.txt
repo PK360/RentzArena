@@ -1,0 +1,31 @@
+King of Hearts
+type: per_round
+if(HEART_KING)
+  add(-100)
+  game_end()
+endif
+
+Queens
+type: per_round
+add(-30 * Q_NR, Q_NR > 0)
+if(TOTAL_Q_NR == 0)
+  game_end()
+endif
+
+Diamonds
+type: per_round
+add(-15 * DIAMOND_NR, DIAMOND_NR > 0)
+if(TOTAL_DIAMOND_NR == 0)
+  game_end()
+endif
+
+10 of Clubs
+type: per_round
+if(CLUB_TEN)
+  add(-50)
+  game_end()
+endif
+
+Whist
+type: per_round
+add(10)
