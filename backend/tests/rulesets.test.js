@@ -1,0 +1,85 @@
+const test = require('node:test');
+const assert = require('node:assert');
+
+const {
+  RULESETS,
+  evaluateRulesetForTrick,
+  readRootRulesets
+} = require('../rulesets');
+
+test('extracts default base rulesets from root room_rulesets.txt', () => {
+  const rootRules = readRootRulesets();
+
+  assert.deepStrictEqual(
+    rootRules.map((ruleset) => ruleset.label),
+    ['King of Hearts', 'Queens', 'Diamonds', '10 of Clubs', 'Whist']
+  );
+  assert.strictEqual(RULESETS.kingOfHearts.code.includes('add(-100)'), true);
+  assert.strictEqual(RULESETS.tenOfClubs.code.includes('add(100)'), true);
+});
+
+test('scores base default rules from the extracted registry', () => {
+  const common = {
+    playerCount: 4,
+    initialPoints: 0,
+    nonDiscardedCards: []
+  };
+
+  assert.strictEqual(evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'kingOfHearts',
+    handCards: ['K-H']
+  }).delta, -100);
+
+  assert.strictEqual(evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'diamonds',
+    handCards: ['A-D', 'Q-D']
+  }).delta, -30);
+
+  assert.strictEqual(evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'queens',
+    handCards: ['Q-H', 'Q-S']
+  }).delta, -60);
+
+  assert.strictEqual(evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'tenOfClubs',
+    handCards: ['10-C']
+  }).delta, 100);
+
+  assert.strictEqual(evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'whist',
+    handCards: ['A-S']
+  }).delta, 10);
+});
+
+test('scores Levate and Total composite rulesets deterministically', () => {
+  const common = {
+    playerCount: 4,
+    initialPoints: 0,
+    handCards: ['K-H', '10-C', 'Q-D', 'A-D'],
+    nonDiscardedCards: []
+  };
+
+  assert.strictEqual(evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'levate'
+  }).delta, -10);
+
+  const totalPlus = evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'totalPlus'
+  });
+  assert.strictEqual(totalPlus.delta, 270);
+  assert.strictEqual(totalPlus.gameEnded, false);
+
+  const totalMinus = evaluateRulesetForTrick({
+    ...common,
+    rulesetId: 'totalMinus'
+  });
+  assert.strictEqual(totalMinus.delta, -270);
+  assert.strictEqual(totalMinus.gameEnded, false);
+});

@@ -1,16 +1,23 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
+  Ban,
   Check,
+  Clock,
   Copy,
+  Crown,
   Droplet,
   FileCode2,
+  Globe2,
   Home,
   Info,
   Library,
+  Lock,
   LogIn,
+  RefreshCw,
   Settings,
   Sparkles,
   Swords,
+  Trash2,
   Trophy,
   UserRound,
   Users,
@@ -86,15 +93,23 @@ const MAX_ACTIVITY_FEED_ITEMS = 60;
 const TRICK_CARD_CENTER_BOX_PERCENT = 3.2;
 const TRICK_CARD_ROTATION_LIMIT_DEGREES = 18;
 const HAND_CARD_MAX_ADVANCE_RATIO = 0.76;
+const HAND_CARD_MIN_ADVANCE_RATIO = 0.42;
 const HAND_CARD_SIZE_SCALE = 0.95;
+const HAND_CARD_MIN_HEIGHT_PX = 44;
+const HAND_CARD_MAX_HEIGHT_PX = 108;
+const HAND_CARD_MEASURE_MIN_WIDTH_PX = 140;
+const HAND_CARD_MEASURE_MIN_HEIGHT_PX = 42;
 const MIN_PLAYERS_TO_START = 2;
 const MAX_ACTIVE_PLAYERS = 6;
 const ROOM_RULESET_OPTIONS = [
-  { id: 'kingOfHearts', label: 'King of Hearts' },
-  { id: 'queens', label: 'Queens' },
-  { id: 'diamonds', label: 'Diamonds' },
-  { id: 'tenOfClubs', label: '10 of Clubs' },
-  { id: 'whist', label: 'Whist' }
+  { id: 'kingOfHearts', label: 'King of Hearts', abbreviation: 'K♥' },
+  { id: 'diamonds', label: 'Diamonds', abbreviation: '♦' },
+  { id: 'queens', label: 'Queens', abbreviation: 'Q' },
+  { id: 'tenOfClubs', label: '10 of Clubs', abbreviation: '10♣' },
+  { id: 'whist', label: 'Whist', abbreviation: 'W' },
+  { id: 'levate', label: 'Levate', abbreviation: 'L' },
+  { id: 'totalPlus', label: 'Total Plus', abbreviation: 'T+' },
+  { id: 'totalMinus', label: 'Total Minus', abbreviation: 'T-' }
 ];
 const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
   ROOM_RULESET_OPTIONS.reduce((acc, option) => {
@@ -102,6 +117,8 @@ const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
     return acc;
   }, {})
 );
+const DEFAULT_ROOM_VISIBILITY = 'public';
+const TURN_TIMER_RANGE = { min: 5, max: 60, defaultValue: 15 };
 
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
@@ -134,18 +151,34 @@ function clampNumber(value, min, max) {
 }
 
 function normalizeRoomSettings(roomSettings) {
-  const selectedRulesets = ROOM_RULESET_OPTIONS.reduce((acc, option) => {
+  const availableRulesets = roomSettings?.availableRulesets?.length
+    ? roomSettings.availableRulesets.map((option) => ({
+      ...option,
+      abbreviation: option.abbreviation || ROOM_RULESET_OPTIONS.find((fallback) => fallback.id === option.id)?.abbreviation || option.label
+    }))
+    : ROOM_RULESET_OPTIONS;
+  const selectedRulesets = availableRulesets.reduce((acc, option) => {
     acc[option.id] = typeof roomSettings?.selectedRulesets?.[option.id] === 'boolean'
       ? roomSettings.selectedRulesets[option.id]
       : DEFAULT_ROOM_RULESET_SELECTIONS[option.id];
     return acc;
   }, {});
+  const rulesetPermissions = roomSettings?.rulesetPermissions && typeof roomSettings.rulesetPermissions === 'object'
+    ? roomSettings.rulesetPermissions
+    : {};
 
   return {
-    availableRulesets: roomSettings?.availableRulesets?.length
-      ? roomSettings.availableRulesets
-      : ROOM_RULESET_OPTIONS,
-    selectedRulesets
+    availableRulesets,
+    selectedRulesets,
+    rulesetPermissions,
+    nvAllowed: roomSettings?.nvAllowed ?? true,
+    turnTimerSeconds: clampNumber(
+      Number(roomSettings?.turnTimerSeconds ?? TURN_TIMER_RANGE.defaultValue),
+      TURN_TIMER_RANGE.min,
+      TURN_TIMER_RANGE.max
+    ),
+    visibility: roomSettings?.visibility || DEFAULT_ROOM_VISIBILITY,
+    roomName: roomSettings?.roomName || ''
   };
 }
 
@@ -302,6 +335,28 @@ function formatMetaValue(value, fallback = '--') {
   return `${value}`;
 }
 
+function formatDuration(ms = 0) {
+  const totalSeconds = Math.max(0, Math.round(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function getRankDelta(previousRank, nextRank) {
+  if (!previousRank || !nextRank) {
+    return '—';
+  }
+
+  const delta = previousRank - nextRank;
+  if (delta > 0) {
+    return `+${delta}`;
+  }
+  if (delta < 0) {
+    return `${delta}`;
+  }
+  return '0';
+}
+
 function formatMarkingSuit(trickSuit) {
   if (!trickSuit) {
     return 'Waiting...';
@@ -327,34 +382,12 @@ function canPlayCard({ card, hand, trickSuit, isMyTurn, trickPending }) {
   return !hand.some((handCard) => parseCard(handCard).suit === trickSuit);
 }
 
-function getDesktopSeatOrder(players, myIndex) {
+function getDesktopSeatOrder(players) {
   if (!players.length) {
     return [];
   }
 
   return [...players];
-}
-
-function getSeatFitRadius({ centerX, centerY, width, height, angles, padding }) {
-  return angles.reduce((closestBoundary, angle) => {
-    const horizontal = Math.cos(angle);
-    const vertical = Math.sin(angle);
-    let angleRadius = Number.POSITIVE_INFINITY;
-
-    if (horizontal > 0.001) {
-      angleRadius = Math.min(angleRadius, (width - padding.right - centerX) / horizontal);
-    } else if (horizontal < -0.001) {
-      angleRadius = Math.min(angleRadius, (centerX - padding.left) / Math.abs(horizontal));
-    }
-
-    if (vertical > 0.001) {
-      angleRadius = Math.min(angleRadius, (height - padding.bottom - centerY) / vertical);
-    } else if (vertical < -0.001) {
-      angleRadius = Math.min(angleRadius, (centerY - padding.top) / Math.abs(vertical));
-    }
-
-    return Math.min(closestBoundary, angleRadius);
-  }, Number.POSITIVE_INFINITY);
 }
 
 function getDesktopSeatLayoutMetrics({ playerCount, stageRect, boardRect, stageTightness = 0 }) {
@@ -835,10 +868,11 @@ function TrickBoard({ currentTrick, trickPending, trickWinnerId, boardRef }) {
         }
       }, 50);
       return () => window.clearTimeout(timer);
-    } else {
-      setFlightPaths(null);
     }
-  }, [trickPending, trickWinnerId, currentTrick.length]);
+
+    const timer = window.setTimeout(() => setFlightPaths(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [boardRef, trickPending, trickWinnerId, currentTrick.length]);
 
   return (
     <section
@@ -933,6 +967,175 @@ function CollectedHandsView({ players, collectedHandsByPlayer, myPlayerId }) {
   );
 }
 
+function ModalShell({ title, eyebrow, onClose, children, footer, wide = false }) {
+  return (
+    <div className="rentz-modal-overlay absolute inset-0 z-[80] flex items-center justify-center px-4 py-6">
+      <div className={clsx('rentz-modal-panel glass-panel flex max-h-[82vh] w-full flex-col rounded-[2rem] p-5 sm:p-6', wide ? 'max-w-6xl' : 'max-w-3xl')}>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            {eyebrow && (
+              <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+                {eyebrow}
+              </div>
+            )}
+            <h3 className="mt-2 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">
+              {title}
+            </h3>
+          </div>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] p-2 text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+              title="Close"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+        <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+          {children}
+        </div>
+        {footer && <div className="mt-5 shrink-0">{footer}</div>}
+      </div>
+    </div>
+  );
+}
+
+function ToggleCheck({ checked, disabled = false, onChange, label, compact = false }) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={onChange}
+      className={clsx(
+        'rentz-toggle-check',
+        checked && 'is-checked',
+        disabled && 'is-disabled',
+        compact && 'is-compact'
+      )}
+    >
+      <span className="rentz-toggle-check-mark" aria-hidden="true">
+        <Check className="h-3.5 w-3.5" strokeWidth={3.2} />
+      </span>
+    </button>
+  );
+}
+
+function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchComplete }) {
+  if (!stats) {
+    return null;
+  }
+
+  const playersById = new Map(players.map((player) => [player.userId, player]));
+  const rankingRows = players.map((player) => {
+    const previousRank = stats.previousRanks?.[player.userId];
+    const nextRank = stats.nextRanks?.[player.userId];
+    const scoreDelta = stats.scoreDeltas?.[player.userId] || 0;
+
+    return {
+      player,
+      previousRank,
+      nextRank,
+      scoreDelta
+    };
+  }).sort((left, right) => {
+    const leftRank = left.nextRank || 999;
+    const rightRank = right.nextRank || 999;
+    return leftRank - rightRank;
+  });
+
+  return (
+    <ModalShell
+      title={matchComplete ? 'Final Stats' : 'Round Stats'}
+      eyebrow={`${stats.rulesetLabel || 'Ruleset'}${stats.nv ? ' (NV)' : ''}`}
+      onClose={onClose}
+      wide
+      footer={(
+        <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+          {canContinue && !matchComplete && (
+            <button type="button" onClick={onContinue} className="frutiger-button px-5 py-3 text-sm uppercase tracking-[0.14em]">
+              Continue match
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+          >
+            Close
+          </button>
+        </div>
+      )}
+    >
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+        <section className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div className="status-pill px-4 py-3">Time {formatDuration(stats.durationMs)}</div>
+            <div className="status-pill px-4 py-3">Game {stats.rulesetAbbreviation || stats.rulesetLabel}</div>
+            <div className="status-pill px-4 py-3">{stats.nv ? 'NV x2' : 'Normal'}</div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {rankingRows.map(({ player, previousRank, nextRank, scoreDelta }) => (
+              <div key={player.userId} className="flex items-center justify-between gap-3 rounded-[1.15rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] px-4 py-3">
+                <div className="min-w-0">
+                  <div className="truncate text-base font-black text-[var(--text-primary)]">{getPlayerName(player)}</div>
+                  <div className="text-xs font-bold text-[var(--text-secondary)]">
+                    Rank {previousRank || '—'} → {nextRank || '—'} ({getRankDelta(previousRank, nextRank)})
+                  </div>
+                </div>
+                <div className={clsx('text-lg font-black', scoreDelta >= 0 ? 'text-emerald-700' : 'text-red-700')}>
+                  {scoreDelta >= 0 ? '+' : ''}{scoreDelta}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <h4 className="text-lg font-display font-black text-[var(--text-primary)]">Taken Hands</h4>
+            <div className="status-pill px-3 py-2">{stats.tricks?.length || 0}</div>
+          </div>
+          <div className="grid max-h-[46vh] gap-3 overflow-y-auto pr-1">
+            {(stats.tricks || []).length === 0 ? (
+              <div className="rounded-[1.2rem] border border-dashed border-[var(--glass-border)] bg-[var(--surface-subtle)] p-4 text-sm font-semibold text-[var(--text-secondary)]">
+                No hands were taken in this round.
+              </div>
+            ) : stats.tricks.map((trick) => (
+              <div key={`${stats.roundId}-${trick.index}`} className="rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Hand {trick.index}</span>
+                  <span className={clsx('rounded-full px-3 py-1 text-xs font-black', trick.scoreDelta >= 0 ? 'bg-emerald-200/80 text-emerald-900' : 'bg-red-200/80 text-red-900')}>
+                    {trick.scoreDelta >= 0 ? '+' : ''}{trick.scoreDelta}
+                  </span>
+                </div>
+                <div className="mb-3 text-sm font-bold text-[var(--text-secondary)]">
+                  Taken by {getPlayerName(playersById.get(trick.takenBy)) || trick.takenByName}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {(trick.cards || []).map((play, index) => (
+                    <div key={`${trick.index}-${play.card}-${index}`} className="flex flex-col items-center gap-1">
+                      <Card cardString={play.card} compact disabled />
+                      <span className="max-w-[4.5rem] truncate text-[10px] font-bold uppercase tracking-[0.1em] text-[var(--text-secondary)]">
+                        {play.playerName}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      </div>
+    </ModalShell>
+  );
+}
+
 function App() {
   const [theme, setTheme] = useState(() =>
     readStoredPreference(
@@ -965,8 +1168,15 @@ function App() {
   const [spectators, setSpectators] = useState([]);
   const [lobbyHostId, setLobbyHostId] = useState('');
   const [roomSettings, setRoomSettings] = useState(() => normalizeRoomSettings());
-  const [draftRoomRulesets, setDraftRoomRulesets] = useState(() => ({ ...DEFAULT_ROOM_RULESET_SELECTIONS }));
+  const [draftRoomSettings, setDraftRoomSettings] = useState(() => normalizeRoomSettings());
   const [isRoomSettingsOpen, setIsRoomSettingsOpen] = useState(false);
+  const [roomName, setRoomName] = useState('');
+  const [roomVisibility, setRoomVisibility] = useState(DEFAULT_ROOM_VISIBILITY);
+  const [newRoomName, setNewRoomName] = useState('');
+  const [newRoomVisibility, setNewRoomVisibility] = useState(DEFAULT_ROOM_VISIBILITY);
+  const [isPublicBrowserOpen, setIsPublicBrowserOpen] = useState(false);
+  const [publicRooms, setPublicRooms] = useState([]);
+  const [publicRoomsLoading, setPublicRoomsLoading] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [guestProfile, setGuestProfile] = useState(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -986,6 +1196,11 @@ function App() {
   const [animatingWinner, setAnimatingWinner] = useState(null);
   const [trickWinnerId, setTrickWinnerId] = useState(null);
   const [collectedHandsByPlayer, setCollectedHandsByPlayer] = useState({});
+  const [choiceState, setChoiceState] = useState(null);
+  const [latestRoundStats, setLatestRoundStats] = useState(null);
+  const [isStatsOpen, setIsStatsOpen] = useState(false);
+  const [matchCompletePending, setMatchCompletePending] = useState(false);
+  const [timerNow, setTimerNow] = useState(() => Date.now());
   const [activityFeed, setActivityFeed] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [finalStandings, setFinalStandings] = useState([]);
@@ -1109,13 +1324,19 @@ function App() {
 
     socket.connect();
 
-    socket.on('lobby_update', ({ players: lobbyPlayers, spectators: lobbySpectators, hostId: nextHostId }) => {
+    socket.on('lobby_update', (lobby) => {
+      const { players: lobbyPlayers, spectators: lobbySpectators, hostId: nextHostId } = lobby || {};
       setPlayers(lobbyPlayers || []);
       setSpectators(lobbySpectators || []);
       setLobbyHostId(nextHostId || '');
+      const nextRoomSettings = normalizeRoomSettings(lobby?.roomSettings);
+      setRoomSettings(nextRoomSettings);
+      setDraftRoomSettings(nextRoomSettings);
+      setRoomName(lobby?.roomName || nextRoomSettings.roomName || '');
+      setRoomVisibility(lobby?.visibility || nextRoomSettings.visibility || DEFAULT_ROOM_VISIBILITY);
     });
 
-    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, stateVersion }) => {
+    socket.on('game_started', ({ hand: nextHand, playerIndex, isSpectator, turnIndex: nextTurnIndex, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, stateVersion, choiceState: nextChoiceState }) => {
       clearScheduledGameEventTimeouts();
       registerGameStateVersion(stateVersion, { reset: true });
       const resolvedHand = nextHand || [];
@@ -1138,13 +1359,27 @@ function App() {
       setTrickWinnerId(null);
       setActivityFeed([]);
       setFinalStandings([]);
+      setChoiceState(nextChoiceState || null);
+      setLatestRoundStats(null);
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
       applyPlayerPoints(nextPlayerPoints);
     });
 
-    socket.on('game_update', ({ currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts, stateVersion }) => {
+    socket.on('choice_state_update', ({ choiceState: nextChoiceState, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
       registerGameStateVersion(stateVersion);
-      setCurrentTrick(nextTrick);
-      setTurnIndex(nextTurnIndex);
+      setChoiceState(nextChoiceState || null);
+      if (nextCardCounts) {
+        setCardCounts(nextCardCounts);
+      }
+      applyPlayerPoints(nextPlayerPoints);
+    });
+
+    socket.on('small_game_started', ({ message, choiceState: nextChoiceState, currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, collectedHandsByPlayer: nextCollectedHands, stateVersion }) => {
+      registerGameStateVersion(stateVersion);
+      setChoiceState(nextChoiceState || null);
+      setCurrentTrick(nextTrick || []);
+      setTurnIndex(nextTurnIndex || 0);
       setTrickSuit(nextTrickSuit || null);
       setTrickPending(false);
       setAnimatingWinner(null);
@@ -1152,17 +1387,49 @@ function App() {
       if (nextCardCounts) {
         setCardCounts(nextCardCounts);
       }
+      if (nextCollectedHands) {
+        setCollectedHandsByPlayer(nextCollectedHands);
+      }
+      applyPlayerPoints(nextPlayerPoints);
+      if (message) {
+        setActivityFeed((current) => [message, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+        showTopPrompt(message, 'success');
+      }
+    });
+
+    socket.on('game_update', ({ currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts, stateVersion, choiceState: nextChoiceState }) => {
+      registerGameStateVersion(stateVersion);
+      setCurrentTrick(nextTrick);
+      setTurnIndex(nextTurnIndex);
+      setTrickSuit(nextTrickSuit || null);
+      setTrickPending(false);
+      setAnimatingWinner(null);
+      setTrickWinnerId(null);
+      if (nextChoiceState) {
+        setChoiceState(nextChoiceState);
+      }
+      if (nextCardCounts) {
+        setCardCounts(nextCardCounts);
+      }
     });
 
     socket.on('hand_update', (nextHand) => {
-      setHand(nextHand);
+      const resolvedHand = nextHand || [];
+      if (resolvedHand.length > 0 && startingHandSizeRef.current === 0) {
+        startingHandSizeRef.current = resolvedHand.length;
+        setStartingHandSize(resolvedHand.length);
+      }
+      setHand(resolvedHand);
     });
 
-    socket.on('trick_won', ({ winnerName, winnerId, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
+    socket.on('trick_won', ({ winnerName, winnerId, scoreDelta, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion, choiceState: nextChoiceState }) => {
       registerGameStateVersion(stateVersion);
       setAnimatingWinner(winnerName);
       setTrickWinnerId(winnerId);
       setTrickPending(true);
+      if (nextChoiceState) {
+        setChoiceState(nextChoiceState);
+      }
       scheduleVersionedGameStateUpdate(stateVersion, () => {
         if (nextCollectedHands) {
           setCollectedHandsByPlayer(nextCollectedHands);
@@ -1171,11 +1438,11 @@ function App() {
           setCardCounts(nextCardCounts);
         }
         applyPlayerPoints(nextPlayerPoints);
-        setActivityFeed((current) => [`${winnerName} took the hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+        setActivityFeed((current) => [`${winnerName} took the hand${typeof scoreDelta === 'number' ? ` (${scoreDelta >= 0 ? '+' : ''}${scoreDelta})` : ''}.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       });
     });
 
-    socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, gameFinished: finished, stateVersion }) => {
+    socket.on('trick_end', ({ nextTurnIndex, trickSuit: nextTrickSuit, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, gameFinished: finished, stateVersion, choiceState: nextChoiceState }) => {
       scheduleVersionedGameStateUpdate(stateVersion, () => {
         setTurnIndex(nextTurnIndex);
         setCurrentTrick([]);
@@ -1191,17 +1458,44 @@ function App() {
         if (nextCardCounts) {
           setCardCounts(nextCardCounts);
         }
+        if (nextChoiceState) {
+          setChoiceState(nextChoiceState);
+        }
         applyPlayerPoints(nextPlayerPoints);
       });
     });
 
-    socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
+    socket.on('round_finished', ({ roundStats, matchComplete, standings, choiceState: nextChoiceState, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
+      scheduleVersionedGameStateUpdate(stateVersion, () => {
+        setLatestRoundStats(roundStats || null);
+        setIsStatsOpen(Boolean(roundStats));
+        setMatchCompletePending(Boolean(matchComplete));
+        setChoiceState(nextChoiceState || null);
+        setTrickPending(false);
+        setCurrentTrick([]);
+        if (standings) {
+          setFinalStandings(standings);
+        }
+        if (nextCollectedHands) {
+          setCollectedHandsByPlayer(nextCollectedHands);
+        }
+        if (nextCardCounts) {
+          setCardCounts(nextCardCounts);
+        }
+        applyPlayerPoints(nextPlayerPoints);
+      });
+    });
+
+    socket.on('game_finished', ({ winnerId, winnerName, standings, collectedHandsByPlayer: nextCollectedHands, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion, choiceState: nextChoiceState }) => {
       scheduleVersionedGameStateUpdate(stateVersion, () => {
         setGameFinished(true);
         setTrickPending(false);
         setTrickWinnerId(winnerId);
         setAnimatingWinner(null);
         setFinalStandings(standings || []);
+        setChoiceState(nextChoiceState || null);
+        setMatchCompletePending(true);
+        setIsStatsOpen(true);
         if (nextCollectedHands) {
           setCollectedHandsByPlayer(nextCollectedHands);
         }
@@ -1211,6 +1505,30 @@ function App() {
         applyPlayerPoints(nextPlayerPoints);
         setActivityFeed((current) => [`Game finished. ${winnerName} won the final hand.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       });
+    });
+
+    socket.on('lobby_removed', ({ reason }) => {
+      setInLobby(false);
+      setGameStarted(false);
+      setGameFinished(false);
+      setRoomId('');
+      setPlayers([]);
+      setSpectators([]);
+      setChoiceState(null);
+      setHand([]);
+      showTopPrompt(reason || 'You were removed from the room.', 'error');
+    });
+
+    socket.on('lobby_deleted', ({ reason }) => {
+      setInLobby(false);
+      setGameStarted(false);
+      setGameFinished(false);
+      setRoomId('');
+      setPlayers([]);
+      setSpectators([]);
+      setChoiceState(null);
+      setHand([]);
+      showTopPrompt(reason || 'The room was deleted.', 'error');
     });
 
     socket.on('game_error', (message) => {
@@ -1227,11 +1545,16 @@ function App() {
 
       socket.off('lobby_update');
       socket.off('game_started');
+      socket.off('choice_state_update');
+      socket.off('small_game_started');
       socket.off('game_update');
       socket.off('hand_update');
       socket.off('trick_won');
       socket.off('trick_end');
+      socket.off('round_finished');
       socket.off('game_finished');
+      socket.off('lobby_removed');
+      socket.off('lobby_deleted');
       socket.off('game_error');
     };
   }, []);
@@ -1295,7 +1618,9 @@ function App() {
     setLobbyHostId(lobby?.hostId || '');
     const nextRoomSettings = normalizeRoomSettings(lobby?.roomSettings);
     setRoomSettings(nextRoomSettings);
-    setDraftRoomRulesets({ ...nextRoomSettings.selectedRulesets });
+    setDraftRoomSettings(nextRoomSettings);
+    setRoomName(lobby?.roomName || nextRoomSettings.roomName || '');
+    setRoomVisibility(lobby?.visibility || nextRoomSettings.visibility || DEFAULT_ROOM_VISIBILITY);
   };
 
   const showErrorMessage = (message) => {
@@ -1353,7 +1678,10 @@ function App() {
     }
 
     socket.emit('authenticate', activeProfile);
-    socket.emit('create_lobby', {}, (response) => {
+    socket.emit('create_lobby', {
+      roomName: newRoomName,
+      visibility: newRoomVisibility
+    }, (response) => {
       if (response.success) {
         setRoomId(response.roomId);
         setInLobby(true);
@@ -1361,6 +1689,7 @@ function App() {
         setIsSpectatingGame(false);
         setGameFinished(false);
         setFinalStandings([]);
+        setIsPublicBrowserOpen(false);
         applyLobbyState(response.lobby);
       } else if (response.error) {
         showErrorMessage(response.error);
@@ -1388,6 +1717,7 @@ function App() {
         setIsSpectatingGame(false);
         setGameFinished(false);
         setFinalStandings([]);
+        setIsPublicBrowserOpen(false);
         applyLobbyState(response.lobby);
         if (response.autoSpectator) {
           showTopPrompt(`All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`, 'info');
@@ -1486,20 +1816,94 @@ function App() {
     });
   };
 
+  const refreshPublicRooms = () => {
+    if (!activeProfile) {
+      showErrorMessage('Choose a guest name or sign in before browsing rooms.');
+      return;
+    }
+
+    setPublicRoomsLoading(true);
+    socket.emit('authenticate', activeProfile);
+    socket.emit('list_public_rooms', {}, (response) => {
+      setPublicRoomsLoading(false);
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+
+      setPublicRooms(response?.rooms || []);
+    });
+  };
+
+  const openPublicRoomBrowser = () => {
+    setIsPublicBrowserOpen(true);
+    refreshPublicRooms();
+  };
+
+  const joinPublicRoom = (targetRoomId) => {
+    if (inLobby || gameStarted) {
+      showTopPrompt('Leave your current room before joining another one.', 'error');
+      return;
+    }
+
+    socket.emit('authenticate', activeProfile);
+    socket.emit('join_lobby', { roomId: targetRoomId }, (response) => {
+      if (response.success) {
+        setRoomId(response.roomId);
+        setInLobby(true);
+        setGameStarted(false);
+        setIsSpectatingGame(false);
+        setGameFinished(false);
+        setFinalStandings([]);
+        setIsPublicBrowserOpen(false);
+        applyLobbyState(response.lobby);
+        if (response.autoSpectator) {
+          showTopPrompt(`All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`, 'info');
+        }
+      } else if (response.error) {
+        showErrorMessage(response.error);
+      }
+    });
+  };
+
   const handleOpenRoomSettings = () => {
-    setDraftRoomRulesets({ ...roomSettings.selectedRulesets });
+    setDraftRoomSettings(roomSettings);
     setIsRoomSettingsOpen(true);
   };
 
   const handleRoomRulesetToggle = (ruleId) => {
-    setDraftRoomRulesets((current) => ({
+    setDraftRoomSettings((current) => ({
       ...current,
-      [ruleId]: !current[ruleId]
+      selectedRulesets: {
+        ...current.selectedRulesets,
+        [ruleId]: !current.selectedRulesets[ruleId]
+      }
+    }));
+  };
+
+  const handlePlayerRulesetPermissionToggle = (playerId, ruleId) => {
+    setDraftRoomSettings((current) => ({
+      ...current,
+      rulesetPermissions: {
+        ...current.rulesetPermissions,
+        [playerId]: {
+          ...(current.rulesetPermissions?.[playerId] || {}),
+          [ruleId]: !(current.rulesetPermissions?.[playerId]?.[ruleId] ?? true)
+        }
+      }
     }));
   };
 
   const handleSaveRoomSettings = () => {
-    socket.emit('update_room_settings', { roomId, selectedRulesets: draftRoomRulesets }, (response) => {
+    socket.emit('update_room_settings', {
+      roomId,
+      roomName: draftRoomSettings.roomName,
+      visibility: draftRoomSettings.visibility,
+      nvAllowed: draftRoomSettings.nvAllowed,
+      turnTimerSeconds: draftRoomSettings.turnTimerSeconds,
+      selectedRulesets: draftRoomSettings.selectedRulesets,
+      rulesetPermissions: draftRoomSettings.rulesetPermissions
+    }, (response) => {
       if (response?.error) {
         showErrorMessage(response.error);
         return;
@@ -1511,6 +1915,87 @@ function App() {
 
       setIsRoomSettingsOpen(false);
       showTopPrompt('Room settings updated.', 'success');
+    });
+  };
+
+  const handleTransferHost = (targetUserId) => {
+    socket.emit('transfer_host', { roomId, targetUserId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+      showTopPrompt('Host transferred.', 'success');
+    });
+  };
+
+  const handleKickMember = (targetUserId) => {
+    socket.emit('kick_member', { roomId, targetUserId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+      showTopPrompt('Player kicked.', 'info');
+    });
+  };
+
+  const handleBanMember = (targetUserId) => {
+    socket.emit('ban_member', { roomId, targetUserId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+      showTopPrompt('Player banned.', 'info');
+    });
+  };
+
+  const handleDeleteRoom = () => {
+    socket.emit('delete_lobby', { roomId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+      setInLobby(false);
+      setRoomId('');
+      setPlayers([]);
+      setSpectators([]);
+      setIsRoomSettingsOpen(false);
+      showTopPrompt('Room deleted.', 'info');
+    });
+  };
+
+  const handleNvChoice = (nvSelected) => {
+    socket.emit('set_nv_choice', { roomId, nvSelected }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+      }
+    });
+  };
+
+  const handleChooseRuleset = (rulesetId) => {
+    socket.emit('choose_ruleset', { roomId, rulesetId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+      }
+    });
+  };
+
+  const handleContinueMatch = () => {
+    socket.emit('continue_match', { roomId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
     });
   };
 
@@ -1561,14 +2046,28 @@ function App() {
   const amISpectator = inLobby && !!mySpectatorProfile;
   const isMyTurn = gameStarted && !gameFinished && myIndex === turnIndex;
   const nextTurnPlayer = players[turnIndex];
+  const currentChooser = players.find((player) => player.userId === choiceState?.chooserId) || null;
+  const amIChooser = Boolean(choiceState?.chooserId && choiceState.chooserId === myPlayerId);
+  const isChoosingNv = gameStarted && choiceState?.phase === 'choosing_nv';
+  const isChoosingRuleset = gameStarted && choiceState?.phase === 'choosing_ruleset';
+  const isPlayingRound = gameStarted && !gameFinished && choiceState?.phase === 'playing_round';
+  const activeRoundTimerDeadline = isPlayingRound ? choiceState?.timerDeadline : null;
+  const turnTimerRemainingMs = activeRoundTimerDeadline
+    ? Math.max(0, activeRoundTimerDeadline - timerNow)
+    : 0;
+  const turnTimerRemainingSeconds = Math.ceil(turnTimerRemainingMs / 1000);
+  const turnTimerTotalSeconds = roomSettings.turnTimerSeconds || TURN_TIMER_RANGE.defaultValue;
+  const turnTimerProgress = activeRoundTimerDeadline
+    ? clampNumber(turnTimerRemainingMs / Math.max(turnTimerTotalSeconds * 1000, 1), 0, 1)
+    : 0;
   const fontScalePercent = Math.round(fontScale * 100);
   const pageZoomPercent = Math.round(pageZoom * 100);
-  const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending);
+  const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending || isChoosingNv || isChoosingRuleset);
   const activeSeatsRemaining = Math.max(0, MAX_ACTIVE_PLAYERS - players.length);
   const areActiveSeatsFull = players.length >= MAX_ACTIVE_PLAYERS;
   const selectedRoomRuleLabels = roomSettings.availableRulesets
     .filter((option) => roomSettings.selectedRulesets[option.id])
-    .map((option) => option.label);
+    .map((option) => option.abbreviation || option.label);
   const playableCards = hand.reduce((acc, card) => {
     acc[card] = canPlayCard({
       card,
@@ -1594,13 +2093,29 @@ function App() {
 
   const localTablePlayer = myPlayer || mySpectatorProfile || activeProfile;
   const desktopSeatPlayers = players.length > 0
-    ? getDesktopSeatOrder(players, myIndex)
+    ? getDesktopSeatOrder(players)
     : localTablePlayer
       ? [localTablePlayer]
       : [];
   const isTableStageVisible = activeTab === 'play' && inLobby && gameStarted && !gameFinished && playView === 'table';
   const isHandSpreadVisible = isTableStageVisible;
   const sortedHand = sortCards(hand);
+  const fallbackHandSpreadMetrics = sortedHand.length > 0
+    ? (() => {
+      const fallbackCardHeight = HAND_CARD_MIN_HEIGHT_PX;
+      const fallbackCardWidth = fallbackCardHeight * CARD_ASSET_ASPECT_RATIO;
+      const fallbackCardAdvance = fallbackCardWidth * 0.58;
+      const fallbackSpreadWidth = fallbackCardWidth + (Math.max(0, sortedHand.length - 1) * fallbackCardAdvance);
+
+      return {
+        cardHeight: fallbackCardHeight,
+        cardWidth: fallbackCardWidth,
+        cardAdvance: fallbackCardAdvance,
+        spreadWidth: fallbackSpreadWidth
+      };
+    })()
+    : null;
+  const visibleHandSpreadMetrics = handSpreadMetrics || fallbackHandSpreadMetrics;
   const playersForMobilePanel = [...players].sort((left, right) => {
     if (left.userId === nextTurnPlayer?.userId) {
       return -1;
@@ -1624,6 +2139,22 @@ function App() {
   const handleEmojiPrompt = (player) => {
     showTopPrompt(`Emoji reactions are not wired yet for ${getPlayerName(player)}.`, 'info');
   };
+
+  useEffect(() => {
+    if (!activeRoundTimerDeadline) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => setTimerNow(Date.now()), 0);
+    const intervalId = window.setInterval(() => {
+      setTimerNow(Date.now());
+    }, 250);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+    };
+  }, [activeRoundTimerDeadline]);
 
   useEffect(() => {
     const stageElement = tableStageRef.current;
@@ -1695,21 +2226,50 @@ function App() {
 
     let frameId = 0;
     const updateHandSpread = () => {
-      const originalScrollWidth = scrollElement.clientWidth;
-      const originalCardHeight = scrollElement.clientHeight;
+      const scrollRect = scrollElement.getBoundingClientRect();
+      const parentRect = scrollElement.parentElement?.getBoundingClientRect();
+      const measuredWidth = scrollRect.width || scrollElement.clientWidth || parentRect?.width || 0;
+      const measuredHeight = scrollRect.height || scrollElement.clientHeight || parentRect?.height || 0;
 
-      if (!originalScrollWidth || !originalCardHeight || referenceHandSize === 0) {
+      if (
+        measuredWidth < HAND_CARD_MEASURE_MIN_WIDTH_PX ||
+        measuredHeight < HAND_CARD_MEASURE_MIN_HEIGHT_PX ||
+        referenceHandSize === 0
+      ) {
         return;
       }
 
-      const scrollWidth = originalScrollWidth * 0.75;
-      const cardHeight = originalCardHeight * 0.75;
-
-      const nextCardHeight = Math.max(0, (cardHeight - 4) * HAND_CARD_SIZE_SCALE);
+      const scrollStyles = window.getComputedStyle(scrollElement);
+      const horizontalPadding = Number.parseFloat(scrollStyles.paddingLeft || '0')
+        + Number.parseFloat(scrollStyles.paddingRight || '0');
+      const verticalPadding = Number.parseFloat(scrollStyles.paddingTop || '0')
+        + Number.parseFloat(scrollStyles.paddingBottom || '0');
+      const availableWidth = Math.max(0, measuredWidth - horizontalPadding - 10);
+      const availableHeight = Math.max(0, measuredHeight - verticalPadding - 4);
+      const widthFitDenominator = CARD_ASSET_ASPECT_RATIO * (
+        1 + (Math.max(0, referenceHandSize - 1) * HAND_CARD_MAX_ADVANCE_RATIO)
+      );
+      const maxHeightFromWidth = widthFitDenominator > 0
+        ? availableWidth / widthFitDenominator
+        : HAND_CARD_MAX_HEIGHT_PX;
+      const responsiveMaxCardHeight = Math.min(
+        HAND_CARD_MAX_HEIGHT_PX,
+        Math.max(HAND_CARD_MIN_HEIGHT_PX, maxHeightFromWidth),
+        Math.max(HAND_CARD_MIN_HEIGHT_PX, availableHeight)
+      );
+      const nextCardHeight = clampNumber(
+        availableHeight * HAND_CARD_SIZE_SCALE,
+        Math.min(HAND_CARD_MIN_HEIGHT_PX, responsiveMaxCardHeight),
+        responsiveMaxCardHeight
+      );
       const nextCardWidth = nextCardHeight * CARD_ASSET_ASPECT_RATIO;
       const maxAdvance = nextCardWidth * HAND_CARD_MAX_ADVANCE_RATIO;
+      const minAdvance = nextCardWidth * HAND_CARD_MIN_ADVANCE_RATIO;
+      const fittingAdvance = referenceHandSize > 1
+        ? (availableWidth - nextCardWidth) / (referenceHandSize - 1)
+        : nextCardWidth;
       const nextCardAdvance = referenceHandSize > 1
-        ? Math.min(maxAdvance, Math.max(0, (scrollWidth - nextCardWidth) / (referenceHandSize - 1)))
+        ? clampNumber(fittingAdvance, minAdvance, maxAdvance)
         : nextCardWidth;
       const nextSpreadWidth = nextCardWidth + (Math.max(0, referenceHandSize - 1) * nextCardAdvance);
 
@@ -1747,6 +2307,9 @@ function App() {
       : null;
 
     resizeObserver?.observe(scrollElement);
+    if (scrollElement.parentElement) {
+      resizeObserver?.observe(scrollElement.parentElement);
+    }
     window.addEventListener('resize', queueHandSpreadUpdate);
 
     return () => {
@@ -1754,7 +2317,7 @@ function App() {
       window.removeEventListener('resize', queueHandSpreadUpdate);
       resizeObserver?.disconnect();
     };
-  }, [isHandSpreadVisible, pageZoom, startingHandSize]);
+  }, [hand.length, isHandSpreadVisible, pageZoom, startingHandSize]);
 
   const isCompactGameHeader = activeTab === 'play' && inLobby && gameStarted;
 
@@ -1763,7 +2326,7 @@ function App() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap items-center gap-3">
           <h3 className="text-2xl font-display font-extrabold text-[var(--text-primary)] sm:text-3xl">
-            Room
+            {roomName || 'Room'}
           </h3>
           <div className="flex items-center gap-2 rounded-[1.35rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-3 py-2 shadow-sm">
             <span className="text-base font-black tracking-[0.22em] text-[var(--text-secondary)] sm:text-lg sm:tracking-[0.26em]">
@@ -1780,6 +2343,9 @@ function App() {
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <div className="status-pill px-4 py-2">
+            {roomVisibility === 'public' ? 'Public' : 'Private'}
+          </div>
           <div className="status-pill px-4 py-2">
             {players.length}/{MAX_ACTIVE_PLAYERS} active
           </div>
@@ -2008,18 +2574,47 @@ function App() {
 
       <div className="grid gap-5 lg:grid-cols-2">
         <div className="glass-panel p-5 sm:p-8">
-          <h3 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Host Private Table</h3>
+          <h3 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Host Table</h3>
           <p className="mb-6 text-base font-semibold text-[var(--text-secondary)] sm:text-sm">
-            Spin up a private room, copy the code, and invite your friends.
+            Create a named room. Public rooms appear in the browser; private rooms still work by code.
           </p>
+          <div className="mb-4 grid gap-3">
+            <input
+              value={newRoomName}
+              onChange={(event) => setNewRoomName(event.target.value)}
+              placeholder={activeProfile ? `${getPlayerName(activeProfile)}'s Room` : 'Room name'}
+              className="w-full rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-5 py-4 font-black text-[var(--text-primary)] shadow-inner placeholder:text-[var(--text-secondary)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+            />
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'public', label: 'Public', icon: Globe2 },
+                { id: 'private', label: 'Private', icon: Lock }
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setNewRoomVisibility(option.id)}
+                  className={clsx(
+                    'flex items-center justify-center gap-2 rounded-[1.2rem] border px-4 py-3 text-sm font-black uppercase tracking-[0.14em] transition',
+                    newRoomVisibility === option.id
+                      ? 'border-white/80 bg-[var(--surface-solid)] text-[var(--text-primary)] shadow-md'
+                      : 'border-[var(--glass-border)] bg-[var(--surface-medium)] text-[var(--text-secondary)] hover:bg-[var(--surface-hover)]'
+                  )}
+                >
+                  <option.icon className="h-4 w-4" />
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
           <button onClick={handleCreateLobby} className="frutiger-button w-full py-4 text-base sm:text-lg">
-            Create Private Room
+            Create Room
           </button>
         </div>
         <div className="glass-panel p-5 sm:p-8">
-          <h3 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Join Friends</h3>
+          <h3 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Join Room</h3>
           <p className="mb-6 text-base font-semibold text-[var(--text-secondary)] sm:text-sm">
-            Paste a room code to hop straight into someone else&apos;s room.
+            Paste a private room code or browse currently open public rooms.
           </p>
           <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_auto]">
             <input
@@ -2034,8 +2629,103 @@ function App() {
               Join
             </button>
           </div>
+          <button
+            type="button"
+            onClick={openPublicRoomBrowser}
+            className="mt-3 flex w-full items-center justify-center gap-2 rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-4 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+          >
+            <Users className="h-4 w-4" />
+            Browse public rooms
+          </button>
         </div>
       </div>
+    </div>
+  );
+
+  const renderPublicRoomsView = () => (
+    <div className="relative z-10 m-auto w-full max-w-5xl space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Public Rooms</h3>
+          <p className="mt-2 text-sm font-semibold text-[var(--text-secondary)]">
+            Join one open room at a time. Private rooms still require their code.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={refreshPublicRooms}
+            className="inline-flex items-center gap-2 rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+          >
+            <RefreshCw className="h-4 w-4" />
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsPublicBrowserOpen(false)}
+            className="rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+          >
+            Back
+          </button>
+        </div>
+      </div>
+
+      {inLobby && (
+        <div className="glass-panel p-4 text-sm font-bold text-[var(--text-secondary)]">
+          You are already in room {roomId}. Leave it before joining another public room.
+        </div>
+      )}
+
+      {publicRoomsLoading ? (
+        <div className="glass-panel p-6 text-center text-sm font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+          Loading rooms...
+        </div>
+      ) : publicRooms.length === 0 ? (
+        <div className="glass-panel p-6 text-center text-sm font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+          No public rooms are waiting right now.
+        </div>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {publicRooms.map((room) => (
+            <article key={room.roomId} className="glass-panel p-5">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="truncate text-xl font-black text-[var(--text-primary)]">{room.roomName}</div>
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-extrabold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                    <span>{room.playerCount}/{room.maxPlayers} players</span>
+                    {room.hasFriend && <span className="rounded-full bg-emerald-200/80 px-2 py-1 text-emerald-900">Friend here</span>}
+                  </div>
+                </div>
+                <div className="status-pill px-3 py-2">{room.roomId}</div>
+              </div>
+              <div className="mb-4 flex -space-x-2">
+                {(room.avatars || []).map((avatar, index) => (
+                  <div key={`${room.roomId}-${avatar.userId || index}`} className="seat-avatar h-10 w-10 border-2 border-white text-xs">
+                    {avatar.avatarUrl ? (
+                      <img src={avatar.avatarUrl} alt="" className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      getPlayerInitials(avatar)
+                    )}
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                disabled={inLobby || gameStarted}
+                onClick={() => joinPublicRoom(room.roomId)}
+                className={clsx(
+                  'w-full rounded-[1.3rem] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] transition',
+                  inLobby || gameStarted
+                    ? 'cursor-not-allowed border border-[var(--glass-border)] bg-[var(--surface-subtle)] text-[var(--text-secondary)] opacity-70'
+                    : 'frutiger-button'
+                )}
+              >
+                {inLobby || gameStarted ? 'Already in a room' : 'Join public room'}
+              </button>
+            </article>
+          ))}
+        </div>
+      )}
     </div>
   );
 
@@ -2187,6 +2877,21 @@ function App() {
 
               <div className="rentz-table-brand">Rentz</div>
 
+              {isPlayingRound && activeRoundTimerDeadline && (
+                <div
+                  className={clsx('rentz-turn-timer-box', turnTimerRemainingSeconds <= 5 && 'is-low')}
+                  style={{ '--timer-progress-deg': `${turnTimerProgress * 360}deg` }}
+                  aria-label={`${turnTimerRemainingSeconds} seconds left for ${nextTurnPlayer ? getPlayerName(nextTurnPlayer) : 'player'} to play`}
+                >
+                  <div className="rentz-turn-timer-ring" aria-hidden="true">
+                    <div className="rentz-turn-timer-face">
+                      <span className="rentz-turn-timer-value">{turnTimerRemainingSeconds}</span>
+                      <span className="rentz-turn-timer-unit">sec</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="rentz-mobile-hero">
                 <div className="rentz-current-player-label">Current player:</div>
                 {nextTurnPlayer ? (
@@ -2293,7 +2998,7 @@ function App() {
               <div ref={handScrollRef} className="rentz-hand-scroll">
                 <div
                   className="rentz-hand-row"
-                  style={sortedHand.length > 0 && handSpreadMetrics ? { width: `${handSpreadMetrics.spreadWidth}px` } : undefined}
+                  style={sortedHand.length > 0 && visibleHandSpreadMetrics ? { width: `${visibleHandSpreadMetrics.spreadWidth}px` } : undefined}
                 >
                   {(() => {
                     let hoverShifts = [];
@@ -2304,9 +3009,9 @@ function App() {
                         ? hoveredCardIndex 
                         : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null);
                       
-                      if (effectiveHoverIndex !== null && handSpreadMetrics && N > 1) {
+                      if (effectiveHoverIndex !== null && visibleHandSpreadMetrics && N > 1) {
                         const H = effectiveHoverIndex;
-                        const A = handSpreadMetrics.cardAdvance;
+                        const A = visibleHandSpreadMetrics.cardAdvance;
                         const hoverWeight = 3.5;
                         
                         const leftTotalWeight = (H > 0) ? ((H - 1) * 1 + hoverWeight) : 0;
@@ -2354,10 +3059,10 @@ function App() {
                           onMouseLeave={() => setHoveredCardIndex(null)}
                           style={{
                             zIndex: index + 1,
-                            height: handSpreadMetrics ? `${handSpreadMetrics.cardHeight}px` : undefined,
-                            width: handSpreadMetrics ? `${handSpreadMetrics.cardWidth}px` : undefined,
-                            marginLeft: index > 0 && handSpreadMetrics
-                              ? `${handSpreadMetrics.cardAdvance - handSpreadMetrics.cardWidth}px`
+                            height: visibleHandSpreadMetrics ? `${visibleHandSpreadMetrics.cardHeight}px` : undefined,
+                            width: visibleHandSpreadMetrics ? `${visibleHandSpreadMetrics.cardWidth}px` : undefined,
+                            marginLeft: index > 0 && visibleHandSpreadMetrics
+                              ? `${visibleHandSpreadMetrics.cardAdvance - visibleHandSpreadMetrics.cardWidth}px`
                               : undefined,
                             '--hover-shift': `${hoverShifts[index]}px`
                           }}
@@ -2397,7 +3102,7 @@ function App() {
               </div>
             </section>
 
-            <div className="flex w-full h-full flex-col justify-center items-center gap-2">
+            <div className="rentz-bottom-action-column flex w-full h-full flex-col justify-center items-center gap-2">
               <button
                 type="button"
                 onClick={() => setPlayView('collected')}
@@ -2503,7 +3208,7 @@ function App() {
         </div>
       );
     } else if (!inLobby) {
-      playContent = renderMatchmaking();
+      playContent = isPublicBrowserOpen ? renderPublicRoomsView() : renderMatchmaking();
     } else if (!gameStarted || (gameFinished && playView !== 'stats')) {
       playContent = renderLobbyView();
     } else {
@@ -2522,6 +3227,148 @@ function App() {
       </>
     );
   };
+
+  const renderChoiceMatrix = () => {
+    const rulesets = choiceState?.availableRulesets?.length
+      ? choiceState.availableRulesets
+      : roomSettings.availableRulesets;
+    const selectedRulesets = choiceState?.selectedRulesets || roomSettings.selectedRulesets;
+    const permissions = choiceState?.rulesetPermissions || roomSettings.rulesetPermissions;
+    const usedChoices = choiceState?.usedChoices || {};
+
+    return (
+      <ModalShell
+        title={amIChooser ? 'Choose a game' : `${getPlayerName(currentChooser)} is choosing a game`}
+        eyebrow={choiceState?.nvSelected ? 'NV selected' : 'Small game'}
+        wide
+      >
+        <div className="rentz-ruleset-grid-wrap overflow-x-auto">
+          <table className="rentz-ruleset-grid w-full min-w-[44rem]">
+            <thead>
+              <tr>
+                <th className="rentz-ruleset-header-cell text-left">
+                  Game
+                </th>
+                {players.map((player) => (
+                  <th
+                    key={player.userId}
+                    className={clsx(
+                      'rentz-ruleset-header-cell text-center',
+                      player.userId === choiceState?.chooserId && 'is-chooser-column'
+                    )}
+                  >
+                    {getPlayerName(player)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rulesets.map((rule) => (
+                <tr key={rule.id}>
+                  <th className="rentz-ruleset-row-header text-left">
+                    <div className="text-lg font-black text-[var(--text-primary)]">{rule.abbreviation || rule.label}</div>
+                    <div className="text-xs font-bold text-[var(--text-secondary)]">{rule.label}</div>
+                  </th>
+                  {players.map((player) => {
+                    const globallyEnabled = selectedRulesets[rule.id] !== false;
+                    const allowed = permissions?.[player.userId]?.[rule.id] !== false;
+                    const used = Boolean(usedChoices?.[player.userId]?.[rule.id]);
+                    const isChooserCell = player.userId === choiceState?.chooserId;
+                    const canChoose = amIChooser && isChooserCell && globallyEnabled && allowed && !used;
+
+                    return (
+                      <td key={`${player.userId}-${rule.id}`}>
+                        <button
+                          type="button"
+                          disabled={!canChoose}
+                          onClick={() => handleChooseRuleset(rule.id)}
+                          className={clsx(
+                            'rentz-ruleset-choice-cell',
+                            canChoose && 'is-pickable',
+                            used && 'is-used',
+                            !used && globallyEnabled && allowed && !canChoose && 'is-open',
+                            (!globallyEnabled || !allowed) && 'is-disabled',
+                            isChooserCell && 'is-chooser-cell'
+                          )}
+                        >
+                          {used ? 'Used' : globallyEnabled && allowed ? (isChooserCell ? 'Pick' : 'Open') : 'Off'}
+                        </button>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {!choiceState?.nvSelected && !isSpectatingGame && (
+          <div className="mt-5 rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+            <div className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+              Your hand
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {sortedHand.length > 0 ? sortedHand.map((card) => (
+                <Card key={`choice-${card}`} cardString={card} compact disabled />
+              )) : (
+                <div className="text-sm font-semibold text-[var(--text-secondary)]">Waiting for cards...</div>
+              )}
+            </div>
+          </div>
+        )}
+      </ModalShell>
+    );
+  };
+
+  const renderNvChoice = () => (
+    <ModalShell
+      title={amIChooser ? 'Choose NV' : `${getPlayerName(currentChooser)} is choosing NV`}
+      eyebrow="Round setup"
+    >
+      <div className="rentz-nv-choice-intro">
+        <div className="status-pill px-3 py-1.5">
+          {amIChooser ? 'Your choice' : 'Waiting for chooser'}
+        </div>
+        <p>
+          NV doubles the selected small game. Choosing it picks the ruleset before the cards are dealt.
+        </p>
+      </div>
+      <div className="rentz-nv-choice-grid">
+        <button
+          type="button"
+          disabled={!amIChooser}
+          onClick={() => handleNvChoice(true)}
+          className={clsx(
+            'rentz-nv-choice-card',
+            amIChooser && 'is-pickable',
+            !amIChooser && 'is-disabled'
+          )}
+        >
+          <span className="rentz-nv-choice-icon">
+            <Sparkles className="h-5 w-5" />
+          </span>
+          <span className="rentz-nv-choice-title">Play NV</span>
+          <span className="rentz-nv-choice-copy">Choose the game first. Scores from the round are doubled.</span>
+        </button>
+        <button
+          type="button"
+          disabled={!amIChooser}
+          onClick={() => handleNvChoice(false)}
+          className={clsx(
+            'rentz-nv-choice-card',
+            amIChooser && 'is-pickable',
+            !amIChooser && 'is-disabled'
+          )}
+        >
+          <span className="rentz-nv-choice-icon">
+            <Swords className="h-5 w-5" />
+          </span>
+          <span className="rentz-nv-choice-title">No NV</span>
+          <span className="rentz-nv-choice-copy">Deal first. Every player sees their own hand during game choice.</span>
+        </button>
+      </div>
+    </ModalShell>
+  );
 
   const renderEditorContent = () => (
     <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
@@ -3019,55 +3866,13 @@ endif`}
       </div>
 
       {isRoomSettingsOpen && (
-        <div className="absolute inset-0 z-[70] flex items-center justify-center bg-[rgba(7,18,32,0.34)] px-4 backdrop-blur-sm">
-          <div className="glass-panel w-full max-w-[34rem] rounded-[2rem] p-5 sm:p-6">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
-                  Host controls
-                </div>
-                <h3 className="mt-2 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">
-                  Room Settings
-                </h3>
-                <p className="mt-2 text-sm font-semibold leading-6 text-[var(--text-secondary)]">
-                  Choose which custom room rules are active before the match starts.
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setIsRoomSettingsOpen(false)}
-                className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] p-2 text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
-                title="Close room settings"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-5 space-y-3">
-              {roomSettings.availableRulesets.map((option) => (
-                <label
-                  key={option.id}
-                  className="flex cursor-pointer items-center justify-between gap-4 rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3.5 transition hover:bg-[var(--surface-hover)]"
-                >
-                  <div>
-                    <div className="text-base font-black text-[var(--text-primary)]">
-                      {option.label}
-                    </div>
-                    <div className="text-xs font-semibold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-                      Enabled for this room
-                    </div>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(draftRoomRulesets[option.id])}
-                    onChange={() => handleRoomRulesetToggle(option.id)}
-                    className="h-5 w-5 accent-emerald-500"
-                  />
-                </label>
-              ))}
-            </div>
-
-            <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+        <ModalShell
+          title="Room Settings"
+          eyebrow="Host controls"
+          onClose={() => setIsRoomSettingsOpen(false)}
+          wide
+          footer={(
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
               <button
                 type="button"
                 onClick={() => setIsRoomSettingsOpen(false)}
@@ -3083,8 +3888,156 @@ endif`}
                 Save room settings
               </button>
             </div>
+          )}
+        >
+          <div className="space-y-5">
+            <section className="grid gap-4 lg:grid-cols-3">
+              <label className="lg:col-span-1">
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Room name</span>
+                <input
+                  value={draftRoomSettings.roomName}
+                  onChange={(event) => setDraftRoomSettings((current) => ({ ...current, roomName: event.target.value }))}
+                  className="w-full rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-black text-[var(--text-primary)] focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+                />
+              </label>
+              <div>
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Visibility</span>
+                <div className="grid grid-cols-2 gap-2">
+                  {[
+                    { id: 'public', label: 'Public', icon: Globe2 },
+                    { id: 'private', label: 'Private', icon: Lock }
+                  ].map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      onClick={() => setDraftRoomSettings((current) => ({ ...current, visibility: option.id }))}
+                      className={clsx(
+                        'flex items-center justify-center gap-2 rounded-[1.1rem] border px-3 py-3 text-xs font-black uppercase tracking-[0.12em]',
+                        draftRoomSettings.visibility === option.id
+                          ? 'border-white/80 bg-[var(--surface-solid)] text-[var(--text-primary)]'
+                          : 'border-[var(--glass-border)] bg-[var(--surface-medium)] text-[var(--text-secondary)]'
+                      )}
+                    >
+                      <option.icon className="h-4 w-4" />
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Round controls</span>
+                <div className="grid gap-2">
+                  <div className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3">
+                    <span className="text-sm font-black text-[var(--text-primary)]">Allow NV</span>
+                    <ToggleCheck
+                      checked={Boolean(draftRoomSettings.nvAllowed)}
+                      onChange={() => setDraftRoomSettings((current) => ({ ...current, nvAllowed: !current.nvAllowed }))}
+                      label="Allow NV games"
+                    />
+                  </div>
+                  <label className="rounded-[1.1rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3">
+                    <span className="mb-2 flex items-center gap-2 text-sm font-black text-[var(--text-primary)]"><Clock className="h-4 w-4" /> Turn timer</span>
+                    <input
+                      type="range"
+                      min={TURN_TIMER_RANGE.min}
+                      max={TURN_TIMER_RANGE.max}
+                      step="5"
+                      value={draftRoomSettings.turnTimerSeconds}
+                      onChange={(event) => setDraftRoomSettings((current) => ({ ...current, turnTimerSeconds: Number(event.target.value) }))}
+                      className="w-full accent-emerald-500"
+                    />
+                    <span className="text-xs font-bold text-[var(--text-secondary)]">{draftRoomSettings.turnTimerSeconds}s</span>
+                  </label>
+                </div>
+              </div>
+            </section>
+
+            <section className="rentz-ruleset-grid-wrap overflow-x-auto rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-3">
+              <table className="rentz-ruleset-grid w-full min-w-[44rem]">
+                <thead>
+                  <tr>
+                    <th className="rentz-ruleset-header-cell text-left">Ruleset</th>
+                    <th className="rentz-ruleset-header-cell text-center">Room</th>
+                    {players.map((player) => (
+                      <th key={player.userId} className="rentz-ruleset-header-cell text-center">
+                        {getPlayerName(player)}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {draftRoomSettings.availableRulesets.map((option) => (
+                    <tr key={option.id}>
+                      <th className="rentz-ruleset-row-header text-left">
+                        <div className="text-lg font-black text-[var(--text-primary)]">{option.abbreviation || option.label}</div>
+                        <div className="text-xs font-bold text-[var(--text-secondary)]">{option.label}</div>
+                      </th>
+                      <td className="text-center">
+                        <ToggleCheck
+                          checked={Boolean(draftRoomSettings.selectedRulesets[option.id])}
+                          onChange={() => handleRoomRulesetToggle(option.id)}
+                          label={`Enable ${option.label} in this room`}
+                          compact
+                        />
+                      </td>
+                      {players.map((player) => (
+                        <td key={`${player.userId}-${option.id}`} className="text-center">
+                          <ToggleCheck
+                            checked={draftRoomSettings.rulesetPermissions?.[player.userId]?.[option.id] !== false && Boolean(draftRoomSettings.selectedRulesets[option.id])}
+                            disabled={!draftRoomSettings.selectedRulesets[option.id]}
+                            onChange={() => handlePlayerRulesetPermissionToggle(player.userId, option.id)}
+                            label={`${getPlayerName(player)} can choose ${option.label}`}
+                            compact
+                          />
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
+
+            <section className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+              <h4 className="mb-3 text-lg font-display font-black text-[var(--text-primary)]">Player Management</h4>
+              <div className="grid gap-3 md:grid-cols-2">
+                {[...players, ...spectators].filter((member) => member.userId !== activeProfile?.userId).map((member) => (
+                  <div key={member.userId} className="flex items-center justify-between gap-3 rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] px-4 py-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-black text-[var(--text-primary)]">{getPlayerName(member)}</div>
+                      <div className="text-xs font-bold text-[var(--text-secondary)]">{member.role}</div>
+                    </div>
+                    <div className="flex gap-1.5">
+                      <button type="button" onClick={() => handleTransferHost(member.userId)} className="rounded-full bg-[var(--surface-medium)] p-2" title="Transfer host"><Crown className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => handleKickMember(member.userId)} className="rounded-full bg-[var(--surface-medium)] p-2" title="Kick"><X className="h-4 w-4" /></button>
+                      <button type="button" onClick={() => handleBanMember(member.userId)} className="rounded-full bg-[var(--surface-medium)] p-2" title="Ban"><Ban className="h-4 w-4" /></button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={handleDeleteRoom}
+                className="mt-4 inline-flex items-center gap-2 rounded-[1.2rem] border border-red-200/70 bg-red-200/70 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-red-950"
+              >
+                <Trash2 className="h-4 w-4" />
+                Delete room
+              </button>
+            </section>
           </div>
-        </div>
+        </ModalShell>
+      )}
+
+      {isChoosingNv && renderNvChoice()}
+      {isChoosingRuleset && renderChoiceMatrix()}
+      {isStatsOpen && latestRoundStats && (
+        <StatsOverlay
+          stats={latestRoundStats}
+          players={players}
+          canContinue={amIHost}
+          matchComplete={matchCompletePending || gameFinished}
+          onContinue={handleContinueMatch}
+          onClose={() => setIsStatsOpen(false)}
+        />
       )}
 
       <nav className="mobile-tab-bar fixed bottom-3 left-2 right-2 z-50 sm:bottom-4 sm:left-3 sm:right-3 md:hidden">

@@ -22,7 +22,7 @@ endif
 10 of Clubs
 type: per_round
 if(CLUB_TEN)
-  add(-50)
+  add(100)
   game_end()
 endif
 
