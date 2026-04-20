@@ -5,7 +5,7 @@ const mongoose = require('mongoose');
 const { Server } = require('socket.io');
 
 const createApp = require('./src/app');
-const { connectToMongo, getMongoUri } = require('./src/lib/database');
+const { connectToMongo, disconnectFromMongo, getMongoUri } = require('./src/lib/database');
 const registerSocketHandlers = require('./socketManager');
 
 const PORT = Number(process.env.PORT || 4000);
@@ -21,6 +21,31 @@ function start() {
   });
 
   registerSocketHandlers(io);
+
+  let isShuttingDown = false;
+  const shutdown = (signal) => {
+    if (isShuttingDown) {
+      return;
+    }
+
+    isShuttingDown = true;
+    console.log(`${signal} received, closing sockets and HTTP server...`);
+    io.disconnectSockets(true);
+    io.close(() => {
+      server.close(() => {
+        void disconnectFromMongo()
+          .catch((error) => {
+            console.warn('MongoDB disconnect error:', error.message);
+          })
+          .finally(() => {
+            process.exit(0);
+          });
+      });
+    });
+  };
+
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
 
   server.on('error', (error) => {
     console.error('Failed to start backend listener', error);

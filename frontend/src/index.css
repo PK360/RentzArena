@@ -285,6 +285,8 @@
       linear-gradient(180deg, rgba(4, 12, 22, 0.44) 0%, rgba(4, 12, 22, 0.58) 100%);
     backdrop-filter: blur(10px) saturate(118%);
     -webkit-backdrop-filter: blur(10px) saturate(118%);
+    overscroll-behavior: contain;
+    touch-action: none;
   }
 
   .rentz-modal-panel {
@@ -296,6 +298,173 @@
       inset 0 1px 0 rgba(255,255,255,0.65),
       inset 0 -1px 0 rgba(15,23,42,0.08),
       0 26px 70px rgba(2,8,23,0.34);
+    overscroll-behavior: contain;
+    touch-action: none;
+  }
+
+  .rentz-modal-panel [data-rentz-modal-scroll~='y'] {
+    overscroll-behavior: contain;
+    touch-action: pan-y;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rentz-modal-panel [data-rentz-modal-scroll~='x'] {
+    overscroll-behavior: contain;
+    touch-action: pan-x;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  html.rentz-modal-open,
+  body.rentz-modal-open {
+    height: 100%;
+    overflow: hidden !important;
+    overscroll-behavior: none;
+  }
+
+  html.rentz-modal-open .app-shell,
+  body.rentz-modal-open .app-shell {
+    height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden !important;
+    overscroll-behavior: none;
+  }
+
+  html.rentz-modal-open main,
+  body.rentz-modal-open main,
+  html.rentz-modal-open .subpage-viewport,
+  body.rentz-modal-open .subpage-viewport {
+    overflow: hidden !important;
+    overscroll-behavior: none;
+  }
+
+  .rentz-choice-overlay {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100dvh;
+    overflow: hidden;
+    padding: max(0.8rem, env(safe-area-inset-top)) 1rem max(0.8rem, env(safe-area-inset-bottom));
+  }
+
+  .rentz-choice-panel {
+    height: min(82dvh, 42rem);
+    max-height: calc(100dvh - max(1.6rem, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+  }
+
+  .rentz-choice-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-right: 0;
+  }
+
+  .rentz-choice-status-pill {
+    flex: 0 0 auto;
+    border: 1px solid rgba(255,255,255,0.72);
+    border-radius: 999px;
+    box-shadow:
+      inset 0 1px 2px rgba(255,255,255,0.74),
+      0 10px 18px rgba(0,0,0,0.1);
+    font-size: 0.74rem;
+    font-weight: 950;
+    letter-spacing: 0.13em;
+    line-height: 1;
+    padding: 0.72rem 1rem;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .rentz-choice-status-pill.is-active {
+    background: linear-gradient(180deg, rgba(226,255,177,0.98) 0%, rgba(125,207,78,0.94) 100%);
+    color: #173d1e;
+  }
+
+  .rentz-choice-status-pill.is-waiting {
+    background: linear-gradient(180deg, rgba(28,38,53,0.88) 0%, rgba(10,18,30,0.9) 100%);
+    color: #f8fafc;
+  }
+
+  .rentz-choice-table-status {
+    flex: 0 0 auto;
+    margin-bottom: 0.65rem;
+    border: 1px solid rgba(255,255,255,0.58);
+    border-radius: 1rem;
+    background: var(--surface-soft);
+    color: var(--text-primary);
+    font-size: 0.86rem;
+    font-weight: 900;
+    line-height: 1.35;
+    padding: 0.72rem 0.9rem;
+  }
+
+  .rentz-choice-table-shell {
+    position: relative;
+    min-height: 0;
+    flex: 1 1 auto;
+    overflow: hidden;
+    border-radius: 1.35rem;
+  }
+
+  .rentz-choice-table-shell.is-waiting .rentz-choice-table-scroll {
+    filter: brightness(0.58) saturate(0.7);
+    opacity: 0.7;
+  }
+
+  .rentz-choice-table-shell.is-waiting::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: rgba(2,8,23,0.34);
+    pointer-events: none;
+  }
+
+  .rentz-choice-table-scroll {
+    height: 100%;
+    max-height: 100%;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rentz-choice-hand-dock {
+    flex: 0 0 auto;
+    width: 100%;
+    margin-top: 0.8rem;
+    border: 1px solid rgba(255,255,255,0.52);
+    border-radius: 1.15rem;
+    background: var(--surface-soft);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.42);
+    padding: 0.72rem;
+  }
+
+  .rentz-choice-hand-title {
+    margin-bottom: 0.45rem;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    font-weight: 950;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+  }
+
+  .rentz-choice-hand-static {
+    display: flex;
+    min-height: 4.9rem;
+    max-height: 7rem;
+    align-items: center;
+    gap: 0.38rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    padding-bottom: 0.1rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .rentz-choice-hand-empty {
+    color: var(--text-secondary);
+    font-size: 0.86rem;
+    font-weight: 800;
   }
 
   .theme-dark-glass .rentz-modal-panel {
@@ -399,6 +568,11 @@
   .rentz-nv-choice-grid {
     display: grid;
     gap: 0.85rem;
+  }
+
+  .rentz-nv-choice-grid.is-waiting {
+    filter: brightness(0.62) saturate(0.72);
+    opacity: 0.72;
   }
 
   @media (min-width: 640px) {
@@ -625,6 +799,40 @@
     zoom: var(--page-zoom);
   }
 
+  @media (max-width: 767px) {
+    .app-shell {
+      --rentz-mobile-nav-reserve: 7.25rem;
+      min-height: 100dvh;
+      overflow-y: auto;
+      padding-top: max(0.5rem, env(safe-area-inset-top));
+      padding-bottom: calc(var(--rentz-mobile-nav-reserve) + env(safe-area-inset-bottom));
+    }
+
+    .app-shell .app-window {
+      height: auto;
+      min-height: calc(100dvh - var(--rentz-mobile-nav-reserve) - max(0.5rem, env(safe-area-inset-top)) - env(safe-area-inset-bottom));
+    }
+
+    .app-shell main {
+      overflow-x: hidden;
+      padding-bottom: calc(var(--rentz-mobile-nav-reserve) + env(safe-area-inset-bottom));
+    }
+
+    .subpage-viewport {
+      overflow-x: hidden;
+    }
+
+    .mobile-tab-bar {
+      bottom: max(0.75rem, env(safe-area-inset-bottom));
+    }
+
+    .mobile-tab-panel,
+    .mobile-more-menu {
+      backdrop-filter: blur(28px) saturate(170%);
+      -webkit-backdrop-filter: blur(28px) saturate(170%);
+    }
+  }
+
   .table-felt {
     background:
       radial-gradient(circle at 50% 45%, var(--table-felt-highlight) 0%, rgba(255,255,255,0.04) 22%, transparent 45%),
@@ -740,6 +948,53 @@
       border-radius: 1.35rem;
     }
 
+    .rentz-choice-overlay {
+      padding: max(0.55rem, env(safe-area-inset-top)) 0.55rem max(0.55rem, env(safe-area-inset-bottom));
+    }
+
+    .rentz-choice-panel {
+      height: calc(100dvh - max(1.1rem, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+      max-height: calc(100dvh - max(1.1rem, env(safe-area-inset-top) + env(safe-area-inset-bottom)));
+      border-radius: 1.35rem;
+      padding: 1rem;
+    }
+
+    .rentz-choice-panel h3 {
+      font-size: 1.45rem;
+      line-height: 1.08;
+    }
+
+    .rentz-choice-status-pill {
+      font-size: 0.62rem;
+      letter-spacing: 0.08em;
+      padding: 0.56rem 0.7rem;
+    }
+
+    .rentz-choice-table-status {
+      margin-bottom: 0.5rem;
+      border-radius: 0.85rem;
+      font-size: 0.74rem;
+      padding: 0.54rem 0.65rem;
+    }
+
+    .rentz-choice-hand-dock {
+      margin-top: 0.55rem;
+      border-radius: 0.95rem;
+      padding: 0.55rem;
+    }
+
+    .rentz-choice-hand-title {
+      margin-bottom: 0.32rem;
+      font-size: 0.58rem;
+      letter-spacing: 0.12em;
+    }
+
+    .rentz-choice-hand-static {
+      min-height: 4.3rem;
+      max-height: 5.25rem;
+      gap: 0.28rem;
+    }
+
     .opponent-seat .seat-avatar {
       height: 2.45rem;
       width: 2.45rem;
@@ -755,9 +1010,9 @@
       width: 3rem;
     }
 
-    .mobile-tab-bar .glass-panel {
-      backdrop-filter: blur(28px) saturate(170%);
-      -webkit-backdrop-filter: blur(28px) saturate(170%);
+    .mobile-tab-bar {
+      left: 0.55rem;
+      right: 0.55rem;
     }
   }
 
@@ -1964,12 +2219,28 @@
     padding: 0.62rem 0.75rem;
   }
 
+  .rentz-bottom-action-row {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.45rem;
+  }
+
   .rentz-bottom-action-column .rentz-verify-button span {
     font-size: clamp(0.72rem, 0.9vw, 0.92rem);
     max-width: none;
   }
 
+  .rentz-verify-button.is-disabled,
+  .rentz-verify-button:disabled {
+    cursor: not-allowed;
+    filter: saturate(0.72);
+    opacity: 0.56;
+    transform: none;
+  }
+
   .rentz-ruleset-grid-wrap {
+    overflow-x: hidden;
     border-radius: 1.35rem;
     background:
       linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.08) 100%);
@@ -1978,6 +2249,7 @@
   .rentz-ruleset-grid {
     border-collapse: separate;
     border-spacing: 0;
+    table-layout: fixed;
   }
 
   .rentz-ruleset-grid th,
@@ -2022,16 +2294,18 @@
   }
 
   .rentz-ruleset-header-cell.is-chooser-column {
-    background: linear-gradient(180deg, rgba(226,255,177,0.96) 0%, rgba(166,226,105,0.9) 100%);
+    background: linear-gradient(180deg, rgba(239,255,203,0.98) 0%, rgba(142,220,76,0.96) 100%);
     color: #173d1e;
-    box-shadow: inset 0 0 0 2px rgba(255,255,255,0.45);
+    box-shadow:
+      inset 0 0 0 2px rgba(255,255,255,0.58),
+      0 0 0 2px rgba(125,207,78,0.22);
   }
 
   .rentz-ruleset-row-header {
     background: var(--surface-soft);
     padding: 0.78rem 0.75rem;
     vertical-align: middle;
-    width: 12rem;
+    width: clamp(8.6rem, 22%, 12rem);
   }
 
   .rentz-ruleset-grid td {
@@ -2096,6 +2370,73 @@
     background: var(--surface-table-ghost);
     color: var(--text-secondary);
     opacity: 0.45;
+  }
+
+  @media (max-width: 700px) {
+    .rentz-ruleset-grid-wrap {
+      width: 100%;
+      overflow-x: hidden;
+      border-radius: 1rem;
+    }
+
+    .rentz-ruleset-grid {
+      width: 100%;
+      min-width: 0;
+      table-layout: fixed;
+    }
+
+    .rentz-ruleset-header-cell {
+      font-size: 0.56rem;
+      letter-spacing: 0.045em;
+      line-height: 1.05;
+      padding: 0.46rem 0.22rem;
+      word-break: break-word;
+    }
+
+    .rentz-ruleset-header-cell[data-short-label] .rentz-ruleset-player-name {
+      display: none;
+    }
+
+    .rentz-ruleset-header-cell[data-short-label]::after {
+      content: attr(data-short-label);
+      display: inline-flex;
+      min-width: 1.35rem;
+      justify-content: center;
+    }
+
+    .rentz-ruleset-row-header {
+      width: clamp(4.8rem, 25vw, 6.7rem);
+      padding: 0.46rem 0.28rem;
+    }
+
+    .rentz-ruleset-row-header .text-lg {
+      font-size: 0.92rem;
+      line-height: 1.05;
+    }
+
+    .rentz-ruleset-row-header .text-xs {
+      margin-top: 0.1rem;
+      font-size: 0.58rem;
+      line-height: 1.05;
+    }
+
+    .rentz-ruleset-grid td {
+      padding: 0.16rem;
+    }
+
+    .rentz-ruleset-choice-cell {
+      min-height: 2.15rem;
+      border-radius: 0.46rem;
+      font-size: 0.62rem;
+      letter-spacing: 0.02em;
+      padding: 0.1rem;
+    }
+
+    .rentz-toggle-check.is-compact {
+      height: 1.28rem;
+      width: 1.28rem;
+      border-radius: 0.38rem;
+    }
   }
 
   .rentz-seat-slot {

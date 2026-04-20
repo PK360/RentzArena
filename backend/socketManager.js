@@ -14,12 +14,14 @@ const {
 const lobbies = new Map(); // roomId -> Set(socketIds)
 const activeGames = new Map(); // roomId -> game state
 const socketToUser = new Map(); // socketId -> { userId, name }
+const pendingLobbyDisconnects = new Map(); // roomId:userId -> timeout
 const MIN_PLAYERS_TO_START = 2;
 const MAX_ACTIVE_PLAYERS = 6;
 const DEFAULT_ROOM_VISIBILITY = 'public';
 const ROOM_VISIBILITIES = new Set(['public', 'private']);
 const DEFAULT_TURN_TIMER_SECONDS = 15;
 const TURN_TIMER_RANGE = { min: 5, max: 60 };
+const DISCONNECT_GRACE_MS = 120000;
 const SUIT_NAMES = {
   H: 'Hearts',
   D: 'Diamonds',
@@ -96,7 +98,8 @@ function createLobbyMember(user, socketId, { isReady = false, role = 'player' } 
     socketId,
     ...user,
     isReady,
-    role
+    role,
+    isConnected: true
   };
 }
 
@@ -123,6 +126,25 @@ function emitLobbyUpdate(io, roomId, lobby, message) {
 
 function getAllLobbyMembers(lobby) {
   return [...lobby.players, ...lobby.spectators];
+}
+
+function getLobbyDisconnectKey(roomId, userId) {
+  return `${roomId}:${userId}`;
+}
+
+function clearPendingLobbyDisconnect(roomId, userId) {
+  const key = getLobbyDisconnectKey(roomId, userId);
+  const timeoutId = pendingLobbyDisconnects.get(key);
+  if (timeoutId) {
+    clearTimeout(timeoutId);
+    pendingLobbyDisconnects.delete(key);
+  }
+}
+
+function clearLobbyDisconnects(roomId, lobby) {
+  getAllLobbyMembers(lobby).forEach((member) => {
+    clearPendingLobbyDisconnect(roomId, member.userId);
+  });
 }
 
 function getNextHostId(lobby) {
@@ -203,6 +225,31 @@ function ensureRulesetPermissionsForPlayers(lobby) {
 
 function getMemberByUserId(lobby, userId) {
   return getAllLobbyMembers(lobby).find((member) => member.userId === userId) || null;
+}
+
+function getLobbyMemberRole(lobby, userId) {
+  if (lobby.players.some((member) => member.userId === userId)) {
+    return 'player';
+  }
+
+  if (lobby.spectators.some((member) => member.userId === userId)) {
+    return 'spectator';
+  }
+
+  return null;
+}
+
+function updateLobbyMemberSocket(lobby, user, socketId) {
+  const member = getMemberByUserId(lobby, user.userId);
+  if (!member) {
+    return null;
+  }
+
+  member.socketId = socketId;
+  member.name = user.name || member.name;
+  member.displayName = user.displayName || member.displayName;
+  member.isConnected = true;
+  return member;
 }
 
 function findCurrentRoomForUser(user) {
@@ -423,6 +470,74 @@ function serializeChoiceState(game) {
     rulesetPermissions: game.rulesetPermissions || {},
     timerDeadline: game.timerDeadline || null,
     availableRulesets: getAvailableRulesets()
+  };
+}
+
+function buildGameSessionSnapshot(roomId, game, userId, { isSpectator = false } = {}) {
+  const playerIndex = isSpectator
+    ? -1
+    : game.players.findIndex((player) => player.userId === userId);
+  const effectivePlayer = playerIndex >= 0 ? game.players[playerIndex] : null;
+  const gameFinished = game.status === 'finished' || game.phase === 'finished';
+
+  return {
+    roomId,
+    hand: effectivePlayer ? (game.handsReady[effectivePlayer.userId] || []) : [],
+    playerIndex,
+    isSpectator,
+    gameStarted: true,
+    gameFinished,
+    trickPending: Boolean(game.trickPending),
+    currentTrick: game.currentTrick || [],
+    turnIndex: game.turnIndex || 0,
+    trickSuit: game.trickSuit || null,
+    stateVersion: game.stateVersion || 0,
+    cardCounts: buildCardCounts(game),
+    playerPoints: buildPointTotals(game),
+    collectedHandsByPlayer: buildCollectedHands(game),
+    choiceState: serializeChoiceState(game),
+    latestRoundStats: game.lastRoundStats || null,
+    matchComplete: gameFinished || (game.phase === 'round_stats' && !hasRemainingChoices(game)),
+    standings: buildStandings(game),
+    startingHandSize: game.startingHandSize || 0
+  };
+}
+
+function restoreUserSession(io, socket, user) {
+  const currentRoom = findCurrentRoomForUser(user);
+  if (!currentRoom) {
+    return null;
+  }
+
+  const { roomId, room: lobby } = currentRoom;
+  const role = getLobbyMemberRole(lobby, user.userId);
+  const member = updateLobbyMemberSocket(lobby, user, socket.id);
+  if (!member || !role) {
+    return null;
+  }
+
+  clearPendingLobbyDisconnect(roomId, user.userId);
+  socket.join(roomId);
+
+  const game = activeGames.get(roomId);
+  if (game) {
+    const gamePlayer = game.players.find((player) => player.userId === user.userId);
+    if (gamePlayer) {
+      gamePlayer.socketId = socket.id;
+      gamePlayer.name = getUserDisplayName(user);
+      gamePlayer.isConnected = true;
+    }
+  }
+
+  emitLobbyUpdate(io, roomId, lobby);
+
+  return {
+    roomId,
+    assignedRole: role,
+    lobby: serializeLobby(lobby),
+    game: game
+      ? buildGameSessionSnapshot(roomId, game, user.userId, { isSpectator: role === 'spectator' })
+      : null
   };
 }
 
@@ -770,6 +885,7 @@ function removeMemberFromLobby(io, roomId, lobby, targetUserId, reason = 'Remove
   }
 
   const [member] = collection.splice(index, 1);
+  clearPendingLobbyDisconnect(roomId, member.userId);
   delete lobby.rulesetPermissions[member.userId];
   io.to(member.socketId).emit('lobby_removed', { roomId, reason });
   io.sockets.sockets.get(member.socketId)?.leave(roomId);
@@ -780,6 +896,99 @@ function removeMemberFromLobby(io, roomId, lobby, targetUserId, reason = 'Remove
 
   ensureRulesetPermissionsForPlayers(lobby);
   return member;
+}
+
+function abandonUserSession(io, socket, user) {
+  const currentRoom = findCurrentRoomForUser(user);
+  if (!currentRoom) {
+    return { success: true };
+  }
+
+  const { roomId, room: lobby } = currentRoom;
+  const member = getMemberByUserId(lobby, user.userId);
+  clearPendingLobbyDisconnect(roomId, user.userId);
+  socket.leave(roomId);
+
+  if (!member) {
+    return { success: true };
+  }
+
+  if (lobby.status !== 'waiting') {
+    member.isConnected = false;
+    const game = activeGames.get(roomId);
+    const gamePlayer = game?.players.find((player) => player.userId === user.userId);
+    if (gamePlayer) {
+      gamePlayer.isConnected = false;
+    }
+    return { success: true };
+  }
+
+  const playerIndex = lobby.players.findIndex((player) => player.userId === user.userId);
+  const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.userId === user.userId);
+
+  if (playerIndex !== -1) {
+    const [removed] = lobby.players.splice(playerIndex, 1);
+    delete lobby.rulesetPermissions[removed.userId];
+  } else if (spectatorIndex !== -1) {
+    lobby.spectators.splice(spectatorIndex, 1);
+  }
+
+  if (getAllLobbyMembers(lobby).length === 0) {
+    lobbies.delete(roomId);
+    return { success: true };
+  }
+
+  if (lobby.hostId === user.userId) {
+    lobby.hostId = getNextHostId(lobby);
+  }
+
+  ensureRulesetPermissionsForPlayers(lobby);
+  emitLobbyUpdate(io, roomId, lobby, 'A player left');
+  return { success: true };
+}
+
+function scheduleWaitingLobbyDisconnectCleanup(io, roomId, lobby, member, disconnectedSocketId) {
+  clearPendingLobbyDisconnect(roomId, member.userId);
+  member.isConnected = false;
+
+  const timeoutId = setTimeout(() => {
+    pendingLobbyDisconnects.delete(getLobbyDisconnectKey(roomId, member.userId));
+
+    const currentLobby = lobbies.get(roomId);
+    if (!currentLobby || currentLobby.status !== 'waiting') {
+      return;
+    }
+
+    const currentMember = getMemberByUserId(currentLobby, member.userId);
+    if (!currentMember || currentMember.socketId !== disconnectedSocketId || currentMember.isConnected) {
+      return;
+    }
+
+    const playerIndex = currentLobby.players.findIndex((player) => player.userId === member.userId);
+    const spectatorIndex = currentLobby.spectators.findIndex((spectator) => spectator.userId === member.userId);
+
+    if (playerIndex !== -1) {
+      const [removed] = currentLobby.players.splice(playerIndex, 1);
+      delete currentLobby.rulesetPermissions[removed.userId];
+    } else if (spectatorIndex !== -1) {
+      currentLobby.spectators.splice(spectatorIndex, 1);
+    }
+
+    if (getAllLobbyMembers(currentLobby).length === 0) {
+      lobbies.delete(roomId);
+      return;
+    }
+
+    if (currentLobby.hostId === member.userId) {
+      currentLobby.hostId = getNextHostId(currentLobby);
+    }
+
+    ensureRulesetPermissionsForPlayers(currentLobby);
+    emitLobbyUpdate(io, roomId, currentLobby, 'A player left');
+  }, DISCONNECT_GRACE_MS);
+
+  timeoutId.unref?.();
+  pendingLobbyDisconnects.set(getLobbyDisconnectKey(roomId, member.userId), timeoutId);
 }
 
 function playCardForPlayer(io, roomId, playerId, card, { auto = false } = {}) {
@@ -964,10 +1173,37 @@ function attachSocketManager(io) {
 
     // Basic authentication simulation for socket (in final, verify JWT or magic link)
     socket.on('authenticate', (userData) => {
+      if (!userData?.userId) {
+        return;
+      }
+
       socketToUser.set(socket.id, userData);
       console.log(
         `Socket ${socket.id} authenticated as ${userData.displayName || userData.name}`
       );
+    });
+
+    socket.on('restore_session', (_payload = {}, callback = () => {}) => {
+      const user = socketToUser.get(socket.id);
+      if (!user) {
+        return callback({ success: false, error: 'Not authenticated' });
+      }
+
+      const restoredSession = restoreUserSession(io, socket, user);
+      if (!restoredSession) {
+        return callback({ success: true, restoredRoom: false });
+      }
+
+      callback({ success: true, restoredRoom: true, ...restoredSession });
+    });
+
+    socket.on('abandon_session', (_payload = {}, callback = () => {}) => {
+      const user = socketToUser.get(socket.id);
+      if (!user) {
+        return callback({ success: true });
+      }
+
+      callback(abandonUserSession(io, socket, user));
     });
 
     // 1. Create a Lobby
@@ -1037,14 +1273,19 @@ function attachSocketManager(io) {
       if (lobby.status !== 'waiting') return callback({ error: 'Game already in progress' });
       if (lobby.bannedUserIds?.includes(user.userId)) return callback({ error: 'You are banned from this room' });
 
-      const existingPlayer = lobby.players.find((player) => player.socketId === socket.id);
-      const existingSpectator = lobby.spectators.find((spectator) => spectator.socketId === socket.id);
+      const existingPlayer = lobby.players.find((player) => player.socketId === socket.id || player.userId === user.userId);
+      const existingSpectator = lobby.spectators.find((spectator) => spectator.socketId === socket.id || spectator.userId === user.userId);
       let assignment = {
         assignedRole: existingPlayer ? 'player' : 'spectator',
         autoSpectator: false
       };
 
-      if (!existingPlayer && !existingSpectator) {
+      if (existingPlayer || existingSpectator) {
+        clearPendingLobbyDisconnect(normalizedRoomId, user.userId);
+        updateLobbyMemberSocket(lobby, user, socket.id);
+        socket.join(normalizedRoomId);
+        emitLobbyUpdate(io, normalizedRoomId, lobby);
+      } else {
         socket.join(normalizedRoomId);
         assignment = addMemberToLobby(lobby, user, socket.id);
         emitLobbyUpdate(io, normalizedRoomId, lobby);
@@ -1185,7 +1426,8 @@ function attachSocketManager(io) {
       if (lobby.status !== 'waiting') return callback({ error: 'Rooms can only be deleted before the match starts' });
       if (lobby.hostId !== user.userId) return callback({ error: 'Only the host can delete the room' });
 
-      io.to(roomId).emit('lobby_deleted', { roomId, reason: 'The host deleted the room' });
+      clearLobbyDisconnects(roomId, lobby);
+      io.to(roomId).emit('lobby_deleted', { roomId, reason: 'The host deleted the room', deletedBy: user.userId });
       getAllLobbyMembers(lobby).forEach((member) => {
         io.sockets.sockets.get(member.socketId)?.leave(roomId);
       });
@@ -1220,7 +1462,8 @@ function attachSocketManager(io) {
         players: lobby.players.map((player) => ({
           userId: player.userId,
           socketId: player.socketId,
-          name: player.displayName || player.name
+          name: player.displayName || player.name,
+          isConnected: player.isConnected !== false
         })),
         status: 'playing',
         phase: 'initializing',
@@ -1380,30 +1623,24 @@ function attachSocketManager(io) {
       console.log('User disconnected:', socket.id);
       const user = socketToUser.get(socket.id);
       if (user) {
-        // Remove from any waiting lobbies
         for (const [roomId, lobby] of lobbies.entries()) {
+          const member = getAllLobbyMembers(lobby).find((entry) => entry.socketId === socket.id);
+          if (!member) {
+            continue;
+          }
+
+          member.isConnected = false;
+
+          const game = activeGames.get(roomId);
+          const gamePlayer = game?.players.find((player) => player.userId === member.userId);
+          if (gamePlayer) {
+            gamePlayer.isConnected = false;
+          }
+
           if (lobby.status === 'waiting') {
-            const playerIndex = lobby.players.findIndex((player) => player.socketId === socket.id);
-            const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.socketId === socket.id);
-
-            if (playerIndex !== -1) {
-              const [member] = lobby.players.splice(playerIndex, 1);
-              delete lobby.rulesetPermissions[member.userId];
-            } else if (spectatorIndex !== -1) {
-              lobby.spectators.splice(spectatorIndex, 1);
-            } else {
-              continue;
-            }
-
-            if (getAllLobbyMembers(lobby).length === 0) {
-              lobbies.delete(roomId); // cleanup empty lobbies
-            } else {
-              if (lobby.hostId === user.userId) {
-                lobby.hostId = getNextHostId(lobby); // reassign host
-              }
-              ensureRulesetPermissionsForPlayers(lobby);
-              emitLobbyUpdate(io, roomId, lobby, 'A player left');
-            }
+            scheduleWaitingLobbyDisconnectCleanup(io, roomId, lobby, member, socket.id);
+            ensureRulesetPermissionsForPlayers(lobby);
+            emitLobbyUpdate(io, roomId, lobby);
           }
         }
       }

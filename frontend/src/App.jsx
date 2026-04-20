@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   Ban,
+  BarChart3,
   Check,
   Clock,
   Copy,
@@ -13,6 +14,7 @@ import {
   Library,
   Lock,
   LogIn,
+  MoreHorizontal,
   RefreshCw,
   Settings,
   Sparkles,
@@ -125,7 +127,8 @@ const SUIT_ORDER = ['H', 'S', 'D', 'C'];
 const STORAGE_KEYS = {
   theme: 'rentz-theme',
   fontScale: 'rentz-font-scale',
-  pageZoom: 'rentz-page-zoom'
+  pageZoom: 'rentz-page-zoom',
+  guestProfile: 'rentz-guest-profile'
 };
 const FONT_SCALE_RANGE = { min: 70, max: 130, step: 5, defaultValue: 100 };
 const PAGE_ZOOM_RANGE = { min: 100, max: 125, step: 5, defaultValue: 100 };
@@ -237,6 +240,94 @@ function readStoredPreference(key, fallback, allowedValues) {
   } catch {
     return fallback;
   }
+}
+
+function readStoredGuestSession() {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+
+  try {
+    const storedValue = window.sessionStorage.getItem(STORAGE_KEYS.guestProfile);
+    if (!storedValue) {
+      return null;
+    }
+
+    const storedSession = JSON.parse(storedValue);
+    const profile = storedSession?.profile || storedSession;
+    if (!profile?.userId || !profile?.name) {
+      return null;
+    }
+
+    return {
+      profile: {
+        userId: profile.userId,
+        name: profile.name,
+        guest: true
+      },
+      roomId: storedSession?.profile ? (storedSession.roomId || null) : null
+    };
+  } catch {
+    return null;
+  }
+}
+
+function isRefreshNavigation() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  const navigationEntry = window.performance?.getEntriesByType?.('navigation')?.[0];
+  if (navigationEntry?.type) {
+    return navigationEntry.type === 'reload';
+  }
+
+  return window.performance?.navigation?.type === 1;
+}
+
+function storeGuestProfile(profile, { roomId = null } = {}) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.removeItem(STORAGE_KEYS.guestProfile);
+    if (profile?.userId && profile?.name) {
+      window.sessionStorage.setItem(STORAGE_KEYS.guestProfile, JSON.stringify({
+        profile: {
+          userId: profile.userId,
+          name: profile.name,
+          guest: true
+        },
+        roomId: roomId || null
+      }));
+    } else {
+      window.sessionStorage.removeItem(STORAGE_KEYS.guestProfile);
+    }
+  } catch {
+    // Ignore storage failures in restricted environments.
+  }
+}
+
+function updateStoredGuestRoom(roomId) {
+  const storedSession = readStoredGuestSession();
+  if (storedSession?.profile) {
+    storeGuestProfile(storedSession.profile, { roomId });
+  }
+}
+
+function readRecoverableGuestSessionForCurrentNavigation() {
+  const session = readStoredGuestSession();
+  if (!session?.profile) {
+    return null;
+  }
+
+  if (isRefreshNavigation()) {
+    return session;
+  }
+
+  storeGuestProfile(null);
+  return null;
 }
 
 function parseCard(cardString) {
@@ -967,10 +1058,22 @@ function CollectedHandsView({ players, collectedHandsByPlayer, myPlayerId }) {
   );
 }
 
-function ModalShell({ title, eyebrow, onClose, children, footer, wide = false }) {
+function ModalShell({
+  title,
+  eyebrow,
+  onClose,
+  children,
+  footer,
+  wide = false,
+  headerAside = null,
+  afterPanel = null,
+  overlayClassName = '',
+  panelClassName = '',
+  bodyClassName = ''
+}) {
   return (
-    <div className="rentz-modal-overlay absolute inset-0 z-[80] flex items-center justify-center px-4 py-6">
-      <div className={clsx('rentz-modal-panel glass-panel flex max-h-[82vh] w-full flex-col rounded-[2rem] p-5 sm:p-6', wide ? 'max-w-6xl' : 'max-w-3xl')}>
+    <div className={clsx('rentz-modal-overlay fixed inset-0 z-[80] flex items-center justify-center px-4 py-6', overlayClassName)}>
+      <div className={clsx('rentz-modal-panel glass-panel flex max-h-[82vh] w-full flex-col rounded-[2rem] p-5 sm:p-6', wide ? 'max-w-6xl' : 'max-w-3xl', panelClassName)}>
         <div className="flex items-start justify-between gap-4">
           <div>
             {eyebrow && (
@@ -982,6 +1085,7 @@ function ModalShell({ title, eyebrow, onClose, children, footer, wide = false })
               {title}
             </h3>
           </div>
+          {headerAside}
           {onClose && (
             <button
               type="button"
@@ -993,11 +1097,12 @@ function ModalShell({ title, eyebrow, onClose, children, footer, wide = false })
             </button>
           )}
         </div>
-        <div className="mt-5 min-h-0 flex-1 overflow-y-auto pr-1">
+        <div className={clsx('mt-5 min-h-0 flex-1 overflow-y-auto pr-1', bodyClassName)} data-rentz-modal-scroll="y">
           {children}
         </div>
         {footer && <div className="mt-5 shrink-0">{footer}</div>}
       </div>
+      {afterPanel}
     </div>
   );
 }
@@ -1052,13 +1157,12 @@ function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchC
     <ModalShell
       title={matchComplete ? 'Final Stats' : 'Round Stats'}
       eyebrow={`${stats.rulesetLabel || 'Ruleset'}${stats.nv ? ' (NV)' : ''}`}
-      onClose={onClose}
       wide
       footer={(
         <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
           {canContinue && !matchComplete && (
             <button type="button" onClick={onContinue} className="frutiger-button px-5 py-3 text-sm uppercase tracking-[0.14em]">
-              Continue match
+              Continue Match
             </button>
           )}
           <button
@@ -1066,7 +1170,7 @@ function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchC
             onClick={onClose}
             className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
           >
-            Close
+            Hide
           </button>
         </div>
       )}
@@ -1101,7 +1205,7 @@ function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchC
             <h4 className="text-lg font-display font-black text-[var(--text-primary)]">Taken Hands</h4>
             <div className="status-pill px-3 py-2">{stats.tricks?.length || 0}</div>
           </div>
-          <div className="grid max-h-[46vh] gap-3 overflow-y-auto pr-1">
+          <div className="grid max-h-[46vh] gap-3 overflow-y-auto pr-1" data-rentz-modal-scroll="y">
             {(stats.tricks || []).length === 0 ? (
               <div className="rounded-[1.2rem] border border-dashed border-[var(--glass-border)] bg-[var(--surface-subtle)] p-4 text-sm font-semibold text-[var(--text-secondary)]">
                 No hands were taken in this round.
@@ -1159,6 +1263,7 @@ function App() {
     )
   );
   const [activeTab, setActiveTab] = useState('play');
+  const [isMobileMoreOpen, setIsMobileMoreOpen] = useState(false);
   const [playView, setPlayView] = useState('table');
 
   const [inLobby, setInLobby] = useState(false);
@@ -1179,6 +1284,8 @@ function App() {
   const [publicRoomsLoading, setPublicRoomsLoading] = useState(false);
   const [guestNameInput, setGuestNameInput] = useState('');
   const [guestProfile, setGuestProfile] = useState(null);
+  const [recoverableGuestSession, setRecoverableGuestSession] = useState(() => readRecoverableGuestSessionForCurrentNavigation());
+  const [isRecoveryPromptOpen, setIsRecoveryPromptOpen] = useState(() => Boolean(recoverableGuestSession?.profile));
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
 
@@ -1215,6 +1322,8 @@ function App() {
   const gameEventTimeoutsRef = useRef(new Set());
   const latestGameStateVersionRef = useRef(0);
   const startingHandSizeRef = useRef(0);
+  const activeProfileRef = useRef(null);
+  const mobileNavRef = useRef(null);
   const tableStageRef = useRef(null);
   const cardBoardRef = useRef(null);
   const handScrollRef = useRef(null);
@@ -1280,6 +1389,72 @@ function App() {
     }
   }, [ruleDrafts]);
 
+  function applyRestoredSession(response) {
+    if (!response?.success || !response.roomId || !response.lobby) {
+      return;
+    }
+
+    const restoredGame = response.game || null;
+    const restoredHand = restoredGame?.hand || [];
+
+    updateStoredGuestRoom(response.roomId);
+    setRoomId(response.roomId);
+    setInLobby(true);
+    setActiveTab('play');
+    setIsPublicBrowserOpen(false);
+    setIsRoomSettingsOpen(false);
+    setPlayers(response.lobby.players || []);
+    setSpectators(response.lobby.spectators || []);
+    setLobbyHostId(response.lobby.hostId || '');
+    const nextRoomSettings = normalizeRoomSettings(response.lobby.roomSettings);
+    setRoomSettings(nextRoomSettings);
+    setDraftRoomSettings(nextRoomSettings);
+    setRoomName(response.lobby.roomName || nextRoomSettings.roomName || '');
+    setRoomVisibility(response.lobby.visibility || nextRoomSettings.visibility || DEFAULT_ROOM_VISIBILITY);
+
+    if (!restoredGame) {
+      setGameStarted(false);
+      setIsSpectatingGame(false);
+      setGameFinished(false);
+      setChoiceState(null);
+      setHand([]);
+      setStartingHandSize(0);
+      startingHandSizeRef.current = 0;
+      setLatestRoundStats(null);
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
+      return;
+    }
+
+    const restoredStartingHandSize = restoredGame.startingHandSize || restoredHand.length;
+    startingHandSizeRef.current = restoredStartingHandSize;
+    setGameStarted(Boolean(restoredGame.gameStarted));
+    setIsSpectatingGame(Boolean(restoredGame.isSpectator));
+    setGameFinished(Boolean(restoredGame.gameFinished));
+    setTrickPending(Boolean(restoredGame.trickPending));
+    setPlayView('table');
+    setHand(restoredHand);
+    setStartingHandSize(restoredStartingHandSize);
+    setMyIndex(typeof restoredGame.playerIndex === 'number' ? restoredGame.playerIndex : -1);
+    setTurnIndex(restoredGame.turnIndex || 0);
+    setTrickSuit(restoredGame.trickSuit || null);
+    setCardCounts(restoredGame.cardCounts || {});
+    setCollectedHandsByPlayer(restoredGame.collectedHandsByPlayer || {});
+    setCurrentTrick(restoredGame.currentTrick || []);
+    setPendingPlayCard(null);
+    setAnimatingWinner(null);
+    setTrickWinnerId(null);
+    setChoiceState(restoredGame.choiceState || null);
+    setLatestRoundStats(restoredGame.latestRoundStats || null);
+    setIsStatsOpen(Boolean(restoredGame.latestRoundStats && restoredGame.choiceState?.phase === 'round_stats'));
+    setMatchCompletePending(Boolean(restoredGame.matchComplete));
+    setFinalStandings(restoredGame.standings || []);
+    applyPlayerPoints(restoredGame.playerPoints);
+    if (typeof restoredGame.stateVersion === 'number') {
+      latestGameStateVersionRef.current = restoredGame.stateVersion;
+    }
+  }
+
   useEffect(() => {
     const promptTimeouts = topPromptTimeoutsRef.current;
     const gameEventTimeouts = gameEventTimeoutsRef.current;
@@ -1322,7 +1497,25 @@ function App() {
       gameEventTimeouts.add(timeoutId);
     };
 
+    const authenticateAndRestoreSession = () => {
+      const profile = activeProfileRef.current;
+      if (!profile?.userId) {
+        return;
+      }
+
+      socket.emit('authenticate', profile);
+      socket.emit('restore_session', {}, (response) => {
+        if (response?.success) {
+          applyRestoredSession(response);
+        }
+      });
+    };
+
     socket.connect();
+    socket.on('connect', authenticateAndRestoreSession);
+    if (socket.connected) {
+      authenticateAndRestoreSession();
+    }
 
     socket.on('lobby_update', (lobby) => {
       const { players: lobbyPlayers, spectators: lobbySpectators, hostId: nextHostId } = lobby || {};
@@ -1369,6 +1562,10 @@ function App() {
     socket.on('choice_state_update', ({ choiceState: nextChoiceState, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, stateVersion }) => {
       registerGameStateVersion(stateVersion);
       setChoiceState(nextChoiceState || null);
+      if (nextChoiceState?.phase && nextChoiceState.phase !== 'round_stats') {
+        setIsStatsOpen(false);
+        setMatchCompletePending(false);
+      }
       if (nextCardCounts) {
         setCardCounts(nextCardCounts);
       }
@@ -1378,6 +1575,8 @@ function App() {
     socket.on('small_game_started', ({ message, choiceState: nextChoiceState, currentTrick: nextTrick, turnIndex: nextTurnIndex, trickSuit: nextTrickSuit, cardCounts: nextCardCounts, playerPoints: nextPlayerPoints, collectedHandsByPlayer: nextCollectedHands, stateVersion }) => {
       registerGameStateVersion(stateVersion);
       setChoiceState(nextChoiceState || null);
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
       setCurrentTrick(nextTrick || []);
       setTurnIndex(nextTurnIndex || 0);
       setTrickSuit(nextTrickSuit || null);
@@ -1508,6 +1707,7 @@ function App() {
     });
 
     socket.on('lobby_removed', ({ reason }) => {
+      updateStoredGuestRoom(null);
       setInLobby(false);
       setGameStarted(false);
       setGameFinished(false);
@@ -1516,10 +1716,14 @@ function App() {
       setSpectators([]);
       setChoiceState(null);
       setHand([]);
+      setLatestRoundStats(null);
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
       showTopPrompt(reason || 'You were removed from the room.', 'error');
     });
 
-    socket.on('lobby_deleted', ({ reason }) => {
+    socket.on('lobby_deleted', ({ reason, deletedBy }) => {
+      updateStoredGuestRoom(null);
       setInLobby(false);
       setGameStarted(false);
       setGameFinished(false);
@@ -1528,7 +1732,13 @@ function App() {
       setSpectators([]);
       setChoiceState(null);
       setHand([]);
-      showTopPrompt(reason || 'The room was deleted.', 'error');
+      setLatestRoundStats(null);
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
+      showTopPrompt(
+        deletedBy === activeProfileRef.current?.userId ? 'Room deleted.' : (reason || 'The room was deleted.'),
+        deletedBy === activeProfileRef.current?.userId ? 'info' : 'error'
+      );
     });
 
     socket.on('game_error', (message) => {
@@ -1543,6 +1753,7 @@ function App() {
       promptTimeouts.clear();
       clearScheduledGameEventTimeouts();
 
+      socket.off('connect', authenticateAndRestoreSession);
       socket.off('lobby_update');
       socket.off('game_started');
       socket.off('choice_state_update');
@@ -1557,6 +1768,8 @@ function App() {
       socket.off('lobby_deleted');
       socket.off('game_error');
     };
+    // Socket listeners are registered once; reconnect auth reads the live profile from a ref.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -1628,6 +1841,9 @@ function App() {
     window.setTimeout(() => setErrorMsg(''), 3000);
   };
 
+  const recoverableGuestProfile = recoverableGuestSession?.profile || null;
+  const recoverableGuestRoomId = recoverableGuestSession?.roomId || null;
+
   const createSessionProfile = (name, guest = false) => ({
     userId: Math.random().toString(36).slice(2, 10),
     name,
@@ -1641,9 +1857,59 @@ function App() {
     }
 
     const profile = createSessionProfile(trimmedName, true);
+    storeGuestProfile(profile);
     socket.emit('authenticate', profile);
     setGuestProfile(profile);
+    setRecoverableGuestSession(null);
+    setIsRecoveryPromptOpen(false);
     setActiveTab('play');
+  };
+
+  const handleRejoinRecoverableSession = () => {
+    if (!recoverableGuestProfile?.userId) {
+      setIsRecoveryPromptOpen(false);
+      return;
+    }
+
+    storeGuestProfile(recoverableGuestProfile, { roomId: recoverableGuestRoomId });
+    setGuestProfile(recoverableGuestProfile);
+    setGuestNameInput(recoverableGuestProfile.name || '');
+    setRecoverableGuestSession(null);
+    setIsRecoveryPromptOpen(false);
+    setActiveTab('play');
+
+    socket.emit('authenticate', recoverableGuestProfile);
+    socket.emit('restore_session', {}, (response) => {
+      if (response?.success && response.restoredRoom !== false && response.lobby) {
+        applyRestoredSession(response);
+        return;
+      }
+
+      showTopPrompt(
+        recoverableGuestRoomId
+          ? 'Rejoined player session. Previous room is no longer available.'
+          : 'Rejoined player session.',
+        recoverableGuestRoomId ? 'error' : 'info'
+      );
+    });
+  };
+
+  const handleStartFreshSession = () => {
+    const nextName = recoverableGuestProfile?.name || guestNameInput.trim() || 'Player';
+    const profile = createSessionProfile(nextName, true);
+
+    if (recoverableGuestProfile?.userId) {
+      socket.emit('authenticate', recoverableGuestProfile);
+      socket.emit('abandon_session', {});
+    }
+
+    storeGuestProfile(profile);
+    setGuestProfile(profile);
+    setGuestNameInput(nextName);
+    setRecoverableGuestSession(null);
+    setIsRecoveryPromptOpen(false);
+    setActiveTab('play');
+    socket.emit('authenticate', profile);
   };
 
   const handleLogout = () => {
@@ -1666,6 +1932,9 @@ function App() {
     }
 
     setGuestNameInput(guestProfile?.name || '');
+    storeGuestProfile(null);
+    setRecoverableGuestSession(null);
+    setIsRecoveryPromptOpen(false);
     setGuestProfile(null);
     setActiveTab('play');
   };
@@ -1683,6 +1952,7 @@ function App() {
       visibility: newRoomVisibility
     }, (response) => {
       if (response.success) {
+        updateStoredGuestRoom(response.roomId);
         setRoomId(response.roomId);
         setInLobby(true);
         setGameStarted(false);
@@ -1711,6 +1981,7 @@ function App() {
     socket.emit('authenticate', activeProfile);
     socket.emit('join_lobby', { roomId: joinInput.toUpperCase() }, (response) => {
       if (response.success) {
+        updateStoredGuestRoom(response.roomId);
         setRoomId(response.roomId);
         setInLobby(true);
         setGameStarted(false);
@@ -1849,6 +2120,7 @@ function App() {
     socket.emit('authenticate', activeProfile);
     socket.emit('join_lobby', { roomId: targetRoomId }, (response) => {
       if (response.success) {
+        updateStoredGuestRoom(response.roomId);
         setRoomId(response.roomId);
         setInLobby(true);
         setGameStarted(false);
@@ -1963,12 +2235,19 @@ function App() {
         showErrorMessage(response.error);
         return;
       }
+      updateStoredGuestRoom(null);
       setInLobby(false);
       setRoomId('');
       setPlayers([]);
       setSpectators([]);
       setIsRoomSettingsOpen(false);
-      showTopPrompt('Room deleted.', 'info');
+      setGameStarted(false);
+      setGameFinished(false);
+      setChoiceState(null);
+      setHand([]);
+      setLatestRoundStats(null);
+      setIsStatsOpen(false);
+      setMatchCompletePending(false);
     });
   };
 
@@ -2024,6 +2303,15 @@ function App() {
     { id: 'editor', label: 'Editor', icon: FileCode2 },
     ...(!isAuthenticated ? [{ id: 'login', label: 'Login', icon: LogIn }] : [])
   ];
+  const mobilePrimaryNavIds = new Set(['play', 'friends', 'library']);
+  const mobilePrimaryNavItems = navItems.filter((item) => mobilePrimaryNavIds.has(item.id));
+  const mobileMoreNavItems = navItems.filter((item) => !mobilePrimaryNavIds.has(item.id));
+  const isMobileMoreActive = mobileMoreNavItems.some((item) => item.id === activeTab);
+
+  const handleNavSelect = (tabId) => {
+    setActiveTab(tabId);
+    setIsMobileMoreOpen(false);
+  };
 
   const themes = [
     { id: 'theme-frutiger-lime', label: 'Frutiger Lime' },
@@ -2033,6 +2321,7 @@ function App() {
   ];
 
   const activeProfile = isAuthenticated ? userProfile : guestProfile;
+  activeProfileRef.current = activeProfile;
   const activeLobbyPlayer = players.find(
     (player) => player.socketId === socket.id || player.userId === activeProfile?.userId
   );
@@ -2051,6 +2340,20 @@ function App() {
   const isChoosingNv = gameStarted && choiceState?.phase === 'choosing_nv';
   const isChoosingRuleset = gameStarted && choiceState?.phase === 'choosing_ruleset';
   const isPlayingRound = gameStarted && !gameFinished && choiceState?.phase === 'playing_round';
+  const hasActiveModal = Boolean(
+    (isRecoveryPromptOpen && recoverableGuestProfile) ||
+    isRoomSettingsOpen ||
+    isChoosingNv ||
+    isChoosingRuleset ||
+    (isStatsOpen && latestRoundStats)
+  );
+  const canContinueRoundFromStats = Boolean(
+    amIHost &&
+    latestRoundStats &&
+    choiceState?.phase === 'round_stats' &&
+    !matchCompletePending &&
+    !gameFinished
+  );
   const activeRoundTimerDeadline = isPlayingRound ? choiceState?.timerDeadline : null;
   const turnTimerRemainingMs = activeRoundTimerDeadline
     ? Math.max(0, activeRoundTimerDeadline - timerNow)
@@ -2078,6 +2381,151 @@ function App() {
     });
     return acc;
   }, {});
+
+  useEffect(() => {
+    if (!hasActiveModal) {
+      document.documentElement.classList.remove('rentz-modal-open');
+      document.body.classList.remove('rentz-modal-open');
+      return undefined;
+    }
+
+    const root = document.documentElement;
+    const body = document.body;
+    const previousRootOverflow = root.style.overflow;
+    const previousBodyOverflow = body.style.overflow;
+    const previousRootOverscroll = root.style.overscrollBehavior;
+    const previousBodyOverscroll = body.style.overscrollBehavior;
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let lastTouchY = 0;
+
+    const getScrollTarget = (target) => {
+      if (!(target instanceof Element)) {
+        return null;
+      }
+
+      return target.closest('[data-rentz-modal-scroll]');
+    };
+
+    const canScrollVertically = (element) => element.scrollHeight > element.clientHeight + 1;
+
+    const shouldBlockVerticalScroll = (scrollTarget, deltaY) => {
+      if (!canScrollVertically(scrollTarget)) {
+        return true;
+      }
+
+      const atTop = scrollTarget.scrollTop <= 0;
+      const atBottom = scrollTarget.scrollTop + scrollTarget.clientHeight >= scrollTarget.scrollHeight - 1;
+      return (atTop && deltaY > 0) || (atBottom && deltaY < 0);
+    };
+
+    const handleTouchStart = (event) => {
+      const touch = event.touches?.[0];
+      if (!touch) {
+        return;
+      }
+
+      touchStartX = touch.clientX;
+      touchStartY = touch.clientY;
+      lastTouchY = touch.clientY;
+    };
+
+    const handleTouchMove = (event) => {
+      const touch = event.touches?.[0];
+      const scrollTarget = getScrollTarget(event.target);
+
+      if (!touch || !scrollTarget) {
+        event.preventDefault();
+        return;
+      }
+
+      const axis = scrollTarget.getAttribute('data-rentz-modal-scroll') || 'y';
+      const gestureX = Math.abs(touch.clientX - touchStartX);
+      const gestureY = Math.abs(touch.clientY - touchStartY);
+
+      if (axis.includes('x') && gestureX > gestureY) {
+        return;
+      }
+
+      if (!axis.includes('y')) {
+        event.preventDefault();
+        return;
+      }
+
+      const deltaY = touch.clientY - lastTouchY;
+      lastTouchY = touch.clientY;
+
+      if (shouldBlockVerticalScroll(scrollTarget, deltaY)) {
+        event.preventDefault();
+      }
+    };
+
+    const handleWheel = (event) => {
+      const scrollTarget = getScrollTarget(event.target);
+
+      if (!scrollTarget) {
+        event.preventDefault();
+        return;
+      }
+
+      const axis = scrollTarget.getAttribute('data-rentz-modal-scroll') || 'y';
+      const isMostlyHorizontal = Math.abs(event.deltaX) > Math.abs(event.deltaY);
+
+      if (axis.includes('x') && isMostlyHorizontal) {
+        return;
+      }
+
+      if (!axis.includes('y')) {
+        event.preventDefault();
+        return;
+      }
+
+      if (shouldBlockVerticalScroll(scrollTarget, -event.deltaY)) {
+        event.preventDefault();
+      }
+    };
+
+    root.classList.add('rentz-modal-open');
+    body.classList.add('rentz-modal-open');
+    root.style.overflow = 'hidden';
+    body.style.overflow = 'hidden';
+    root.style.overscrollBehavior = 'none';
+    body.style.overscrollBehavior = 'none';
+    document.addEventListener('touchstart', handleTouchStart, { passive: true });
+    document.addEventListener('touchmove', handleTouchMove, { passive: false });
+    document.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      root.classList.remove('rentz-modal-open');
+      body.classList.remove('rentz-modal-open');
+      root.style.overflow = previousRootOverflow;
+      body.style.overflow = previousBodyOverflow;
+      root.style.overscrollBehavior = previousRootOverscroll;
+      body.style.overscrollBehavior = previousBodyOverscroll;
+      document.removeEventListener('touchstart', handleTouchStart);
+      document.removeEventListener('touchmove', handleTouchMove);
+      document.removeEventListener('wheel', handleWheel);
+    };
+  }, [hasActiveModal]);
+
+  useEffect(() => {
+    setIsMobileMoreOpen(false);
+  }, [activeTab]);
+
+  useEffect(() => {
+    if (!isMobileMoreOpen) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (mobileNavRef.current && !mobileNavRef.current.contains(event.target)) {
+        setIsMobileMoreOpen(false);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    return () => document.removeEventListener('pointerdown', handlePointerDown);
+  }, [isMobileMoreOpen]);
 
   useEffect(() => {
     if (!inLobby || gameStarted || !amIHost) {
@@ -2968,148 +3416,36 @@ function App() {
           </div>
 
           <div className="rentz-bottom-strip">
-            <section className="rentz-hand-panel relative">
-              {pendingPlayCard && (
-                <div className="absolute right-4 top-1 z-[110] flex origin-top-right scale-[0.93] flex-col items-center gap-1.5 rounded-[1.2rem] border border-[rgba(255,255,255,0.7)] bg-[linear-gradient(180deg,rgba(255,255,255,0.65)_0%,rgba(210,225,240,0.5)_100%)] p-2 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_8px_16px_rgba(30,50,70,0.12)] backdrop-blur-md">
-                  <span className="text-[0.62rem] font-black uppercase tracking-[0.08em] text-[#1e3445] drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)] pt-0.5">Place card?</span>
-                  <div className="flex w-full justify-between gap-1.5 px-0.5">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setPendingPlayCard(null);
-                      }}
-                      className="flex h-[1.35rem] w-full flex-1 items-center justify-center rounded-full border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.8)_0%,rgba(230,235,240,0.8)_100%)] text-slate-500 shadow-sm transition hover:brightness-105"
-                    >
-                      <X className="h-3 w-3" strokeWidth={3} />
-                    </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        socket.emit('play_card', { roomId, card: pendingPlayCard });
-                        setPendingPlayCard(null);
-                      }}
-                      className="flex h-[1.35rem] w-full flex-1 items-center justify-center rounded-full border border-[#b4e854] bg-[linear-gradient(180deg,#d4fc79_0%,#96e6a1_100%)] text-[#2f5c15] shadow-[0_2px_4px_rgba(150,230,161,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:brightness-105"
-                    >
-                      <Check className="h-3 w-3" strokeWidth={3} />
-                    </button>
-                  </div>
-                </div>
-              )}
-              <div ref={handScrollRef} className="rentz-hand-scroll">
-                <div
-                  className="rentz-hand-row"
-                  style={sortedHand.length > 0 && visibleHandSpreadMetrics ? { width: `${visibleHandSpreadMetrics.spreadWidth}px` } : undefined}
-                >
-                  {(() => {
-                    let hoverShifts = [];
-                    if (sortedHand.length > 0) {
-                      const N = sortedHand.length;
-                      hoverShifts = new Array(N).fill(0);
-                      const effectiveHoverIndex = hoveredCardIndex !== null 
-                        ? hoveredCardIndex 
-                        : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null);
-                      
-                      if (effectiveHoverIndex !== null && visibleHandSpreadMetrics && N > 1) {
-                        const H = effectiveHoverIndex;
-                        const A = visibleHandSpreadMetrics.cardAdvance;
-                        const hoverWeight = 3.5;
-                        
-                        const leftTotalWeight = (H > 0) ? ((H - 1) * 1 + hoverWeight) : 0;
-                        let currentX = 0;
-                        for (let i = 0; i <= H; i++) {
-                          hoverShifts[i] = currentX - i * A;
-                          if (i === H - 1) {
-                            currentX += (H * A) * (hoverWeight / leftTotalWeight);
-                          } else if (i < H - 1) {
-                            currentX += (H * A) * (1 / leftTotalWeight);
-                          }
-                        }
-                        
-                        const R = N - 1 - Math.max(0, H);
-                        const rightTotalWeight = (R > 0) ? ((R - 1) * 1 + hoverWeight) : 0;
-                        currentX = H * A;
-                        for (let i = H + 1; i < N; i++) {
-                          if (i === H + 1) {
-                            currentX += (R * A) * (hoverWeight / rightTotalWeight);
-                          } else {
-                            currentX += (R * A) * (1 / rightTotalWeight);
-                          }
-                          hoverShifts[i] = currentX - i * A;
-                        }
-                      }
-                    }
-
-                    return sortedHand.map((card, index) => {
-                      const playable = playableCards[card];
-                      const disabled = !playable;
-                      const mustFollowSuit = isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
-                      const shouldGhostCard = disabled && (mustFollowSuit || isTurnLocked);
-
-                      const isCardHovered = (hoveredCardIndex !== null ? hoveredCardIndex : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null)) === index;
-
-                      return (
-                        <div
-                          key={`${card}-${index}`}
-                          className={clsx(
-                            'rentz-hand-card-wrap',
-                            playable && 'is-playable',
-                            isCardHovered && 'is-hovered'
-                          )}
-                          onMouseEnter={() => setHoveredCardIndex(index)}
-                          onMouseLeave={() => setHoveredCardIndex(null)}
-                          style={{
-                            zIndex: index + 1,
-                            height: visibleHandSpreadMetrics ? `${visibleHandSpreadMetrics.cardHeight}px` : undefined,
-                            width: visibleHandSpreadMetrics ? `${visibleHandSpreadMetrics.cardWidth}px` : undefined,
-                            marginLeft: index > 0 && visibleHandSpreadMetrics
-                              ? `${visibleHandSpreadMetrics.cardAdvance - visibleHandSpreadMetrics.cardWidth}px`
-                              : undefined,
-                            '--hover-shift': `${hoverShifts[index]}px`
-                          }}
-                        >
-                          <Card
-                            cardString={card}
-                            onClick={() => {
-                              const isMobileDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches || window.innerWidth < 1024;
-                              if (disabled) {
-                                if (isMobileDevice) {
-                                  setPendingPlayCard(null);
-                                }
-                                return;
-                              }
-                              if (isMobileDevice) {
-                                setPendingPlayCard(card);
-                              } else {
-                                socket.emit('play_card', { roomId, card });
-                              }
-                            }}
-                            disabled={disabled}
-                            ghosted={shouldGhostCard}
-                            title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
-                            variant="hand"
-                          />
-                        </div>
-                      );
-                    });
-                  })()}
-
-                  {hand.length === 0 && (
-                    <div className="rentz-empty-hand">
-                      {isSpectatingGame ? 'Spectating this match...' : 'Waiting for the next hand...'}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </section>
+            {renderHandSpread()}
 
             <div className="rentz-bottom-action-column flex w-full h-full flex-col justify-center items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setPlayView('collected')}
-                className="rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5"
-              >
-                <span className="text-[0.85rem] sm:text-[0.95rem]">Review taken hands</span>
-              </button>
+              <div className="rentz-bottom-action-row">
+                <button
+                  type="button"
+                  onClick={() => setPlayView('collected')}
+                  className="rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5"
+                >
+                  <span className="inline-flex items-center justify-center gap-1.5 text-[0.85rem] sm:text-[0.95rem]">
+                    <Swords className="h-4 w-4" />
+                    See Hands
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!latestRoundStats}
+                  onClick={() => latestRoundStats && setIsStatsOpen(true)}
+                  className={clsx(
+                    'rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5',
+                    !latestRoundStats && 'is-disabled'
+                  )}
+                  title={latestRoundStats ? 'Open round stats' : 'Stats appear after a round ends'}
+                >
+                  <span className="inline-flex items-center justify-center gap-1.5 text-[0.85rem] sm:text-[0.95rem]">
+                    <BarChart3 className="h-4 w-4" />
+                    Stats
+                  </span>
+                </button>
+              </div>
 
               <div
                 className="flex w-full shrink-0 items-center justify-between rounded-[1.3rem] border border-[rgba(255,255,255,0.74)] px-3 py-2 sm:px-4 sm:py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(148,163,184,0.16),0_8px_16px_rgba(0,0,0,0.1)]"
@@ -3228,6 +3564,148 @@ function App() {
     );
   };
 
+  const renderHandSpread = ({ mode = 'play' } = {}) => {
+    const isPlayMode = mode === 'play';
+
+    return (
+      <section className={clsx('rentz-hand-panel relative', mode === 'choice' && 'rentz-choice-hand-panel')}>
+        {isPlayMode && pendingPlayCard && (
+          <div className="absolute right-4 top-1 z-[110] flex origin-top-right scale-[0.93] flex-col items-center gap-1.5 rounded-[1.2rem] border border-[rgba(255,255,255,0.7)] bg-[linear-gradient(180deg,rgba(255,255,255,0.65)_0%,rgba(210,225,240,0.5)_100%)] p-2 shadow-[inset_0_1px_1px_rgba(255,255,255,0.9),0_8px_16px_rgba(30,50,70,0.12)] backdrop-blur-md">
+            <span className="text-[0.62rem] font-black uppercase tracking-[0.08em] text-[#1e3445] drop-shadow-[0_1px_1px_rgba(255,255,255,0.8)] pt-0.5">Place card?</span>
+            <div className="flex w-full justify-between gap-1.5 px-0.5">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setPendingPlayCard(null);
+                }}
+                className="flex h-[1.35rem] w-full flex-1 items-center justify-center rounded-full border border-white/60 bg-[linear-gradient(180deg,rgba(255,255,255,0.8)_0%,rgba(230,235,240,0.8)_100%)] text-slate-500 shadow-sm transition hover:brightness-105"
+              >
+                <X className="h-3 w-3" strokeWidth={3} />
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  socket.emit('play_card', { roomId, card: pendingPlayCard });
+                  setPendingPlayCard(null);
+                }}
+                className="flex h-[1.35rem] w-full flex-1 items-center justify-center rounded-full border border-[#b4e854] bg-[linear-gradient(180deg,#d4fc79_0%,#96e6a1_100%)] text-[#2f5c15] shadow-[0_2px_4px_rgba(150,230,161,0.3),inset_0_1px_0_rgba(255,255,255,0.6)] transition hover:brightness-105"
+              >
+                <Check className="h-3 w-3" strokeWidth={3} />
+              </button>
+            </div>
+          </div>
+        )}
+        <div ref={handScrollRef} className="rentz-hand-scroll">
+          <div
+            className="rentz-hand-row"
+            style={sortedHand.length > 0 && visibleHandSpreadMetrics ? { width: `${visibleHandSpreadMetrics.spreadWidth}px` } : undefined}
+          >
+            {(() => {
+              let hoverShifts = [];
+              if (sortedHand.length > 0) {
+                const N = sortedHand.length;
+                hoverShifts = new Array(N).fill(0);
+                const effectiveHoverIndex = hoveredCardIndex !== null
+                  ? hoveredCardIndex
+                  : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null);
+
+                if (effectiveHoverIndex !== null && visibleHandSpreadMetrics && N > 1) {
+                  const H = effectiveHoverIndex;
+                  const A = visibleHandSpreadMetrics.cardAdvance;
+                  const hoverWeight = 3.5;
+
+                  const leftTotalWeight = (H > 0) ? ((H - 1) * 1 + hoverWeight) : 0;
+                  let currentX = 0;
+                  for (let i = 0; i <= H; i += 1) {
+                    hoverShifts[i] = currentX - i * A;
+                    if (i === H - 1) {
+                      currentX += (H * A) * (hoverWeight / leftTotalWeight);
+                    } else if (i < H - 1) {
+                      currentX += (H * A) * (1 / leftTotalWeight);
+                    }
+                  }
+
+                  const R = N - 1 - Math.max(0, H);
+                  const rightTotalWeight = (R > 0) ? ((R - 1) * 1 + hoverWeight) : 0;
+                  currentX = H * A;
+                  for (let i = H + 1; i < N; i += 1) {
+                    if (i === H + 1) {
+                      currentX += (R * A) * (hoverWeight / rightTotalWeight);
+                    } else {
+                      currentX += (R * A) * (1 / rightTotalWeight);
+                    }
+                    hoverShifts[i] = currentX - i * A;
+                  }
+                }
+              }
+
+              return sortedHand.map((card, index) => {
+                const playable = isPlayMode && playableCards[card];
+                const disabled = !playable;
+                const mustFollowSuit = isPlayMode && isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
+                const shouldGhostCard = isPlayMode && disabled && (mustFollowSuit || isTurnLocked);
+
+                const isCardHovered = (hoveredCardIndex !== null ? hoveredCardIndex : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null)) === index;
+
+                return (
+                  <div
+                    key={`${mode}-${card}-${index}`}
+                    className={clsx(
+                      'rentz-hand-card-wrap',
+                      playable && 'is-playable',
+                      isCardHovered && 'is-hovered'
+                    )}
+                    onMouseEnter={() => setHoveredCardIndex(index)}
+                    onMouseLeave={() => setHoveredCardIndex(null)}
+                    style={{
+                      zIndex: index + 1,
+                      height: visibleHandSpreadMetrics ? `${visibleHandSpreadMetrics.cardHeight}px` : undefined,
+                      width: visibleHandSpreadMetrics ? `${visibleHandSpreadMetrics.cardWidth}px` : undefined,
+                      marginLeft: index > 0 && visibleHandSpreadMetrics
+                        ? `${visibleHandSpreadMetrics.cardAdvance - visibleHandSpreadMetrics.cardWidth}px`
+                        : undefined,
+                      '--hover-shift': `${hoverShifts[index]}px`
+                    }}
+                  >
+                    <Card
+                      cardString={card}
+                      onClick={isPlayMode
+                        ? () => {
+                          const isMobileDevice = window.matchMedia('(hover: none) and (pointer: coarse)').matches || window.innerWidth < 1024;
+                          if (disabled) {
+                            if (isMobileDevice) {
+                              setPendingPlayCard(null);
+                            }
+                            return;
+                          }
+                          if (isMobileDevice) {
+                            setPendingPlayCard(card);
+                          } else {
+                            socket.emit('play_card', { roomId, card });
+                          }
+                        }
+                        : undefined}
+                      disabled={disabled}
+                      ghosted={shouldGhostCard}
+                      title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
+                      variant="hand"
+                    />
+                  </div>
+                );
+              });
+            })()}
+
+            {hand.length === 0 && (
+              <div className="rentz-empty-hand">
+                {isSpectatingGame ? 'Spectating this match...' : 'Waiting for the next hand...'}
+              </div>
+            )}
+          </div>
+        </div>
+      </section>
+    );
+  };
+
   const renderChoiceMatrix = () => {
     const rulesets = choiceState?.availableRulesets?.length
       ? choiceState.availableRulesets
@@ -3235,15 +3713,29 @@ function App() {
     const selectedRulesets = choiceState?.selectedRulesets || roomSettings.selectedRulesets;
     const permissions = choiceState?.rulesetPermissions || roomSettings.rulesetPermissions;
     const usedChoices = choiceState?.usedChoices || {};
+    const chooserName = getPlayerName(currentChooser);
+    const showChoiceHand = !choiceState?.nvSelected && !isSpectatingGame;
 
     return (
       <ModalShell
         title={amIChooser ? 'Choose a game' : `${getPlayerName(currentChooser)} is choosing a game`}
         eyebrow={choiceState?.nvSelected ? 'NV selected' : 'Small game'}
         wide
+        overlayClassName="rentz-choice-overlay"
+        panelClassName="rentz-choice-panel"
+        bodyClassName="rentz-choice-body"
+        headerAside={(
+          <div className={clsx('rentz-choice-status-pill', amIChooser ? 'is-active' : 'is-waiting')}>
+            {amIChooser ? 'Your choice' : 'Waiting for chooser'}
+          </div>
+        )}
       >
-        <div className="rentz-ruleset-grid-wrap overflow-x-auto">
-          <table className="rentz-ruleset-grid w-full min-w-[44rem]">
+        <div className="rentz-choice-table-status">
+          {amIChooser ? 'Your highlighted column is active.' : `${chooserName} is choosing. Table actions are paused for you.`}
+        </div>
+        <div className={clsx('rentz-choice-table-shell', !amIChooser && 'is-waiting')}>
+          <div className="rentz-ruleset-grid-wrap rentz-choice-table-scroll overflow-x-auto" data-rentz-modal-scroll="y">
+          <table className="rentz-ruleset-grid w-full">
             <thead>
               <tr>
                 <th className="rentz-ruleset-header-cell text-left">
@@ -3252,12 +3744,14 @@ function App() {
                 {players.map((player) => (
                   <th
                     key={player.userId}
+                    data-short-label={getPlayerInitials(player)}
                     className={clsx(
                       'rentz-ruleset-header-cell text-center',
                       player.userId === choiceState?.chooserId && 'is-chooser-column'
                     )}
+                    title={getPlayerName(player)}
                   >
-                    {getPlayerName(player)}
+                    <span className="rentz-ruleset-player-name">{getPlayerName(player)}</span>
                   </th>
                 ))}
               </tr>
@@ -3300,18 +3794,16 @@ function App() {
               ))}
             </tbody>
           </table>
+          </div>
         </div>
-
-        {!choiceState?.nvSelected && !isSpectatingGame && (
-          <div className="mt-5 rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-            <div className="mb-3 text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-              Your hand
-            </div>
-            <div className="flex flex-wrap gap-2">
+        {showChoiceHand && (
+          <div className="rentz-choice-hand-dock">
+            <div className="rentz-choice-hand-title">Your hand</div>
+            <div className="rentz-choice-hand-static" data-rentz-modal-scroll="x">
               {sortedHand.length > 0 ? sortedHand.map((card) => (
                 <Card key={`choice-${card}`} cardString={card} compact disabled />
               )) : (
-                <div className="text-sm font-semibold text-[var(--text-secondary)]">Waiting for cards...</div>
+                <div className="rentz-choice-hand-empty">Waiting for cards...</div>
               )}
             </div>
           </div>
@@ -3324,16 +3816,20 @@ function App() {
     <ModalShell
       title={amIChooser ? 'Choose NV' : `${getPlayerName(currentChooser)} is choosing NV`}
       eyebrow="Round setup"
-    >
-      <div className="rentz-nv-choice-intro">
-        <div className="status-pill px-3 py-1.5">
+      headerAside={(
+        <div className={clsx('rentz-choice-status-pill', amIChooser ? 'is-active' : 'is-waiting')}>
           {amIChooser ? 'Your choice' : 'Waiting for chooser'}
         </div>
+      )}
+    >
+      <div className="rentz-nv-choice-intro">
         <p>
-          NV doubles the selected small game. Choosing it picks the ruleset before the cards are dealt.
+          {amIChooser
+            ? 'You are choosing whether this round starts as NV.'
+            : `${getPlayerName(currentChooser)} is choosing whether this round starts as NV.`}
         </p>
       </div>
-      <div className="rentz-nv-choice-grid">
+      <div className={clsx('rentz-nv-choice-grid', !amIChooser && 'is-waiting')}>
         <button
           type="button"
           disabled={!amIChooser}
@@ -3751,7 +4247,7 @@ endif`}
 
           <div className="flex w-20 justify-end md:w-24">
             <button
-              onClick={() => setActiveTab('settings')}
+              onClick={() => handleNavSelect('settings')}
               className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] p-2 text-[var(--text-primary)] shadow-sm transition hover:bg-[var(--surface-hover)]"
               title="Open settings"
             >
@@ -3814,7 +4310,7 @@ endif`}
                 return (
                   <button
                     key={item.id}
-                    onClick={() => setActiveTab(item.id)}
+                    onClick={() => handleNavSelect(item.id)}
                     className={clsx(
                       'flex items-center gap-4 rounded-2xl px-4 py-3.5 text-left font-medium transition-[transform,background-color,color,box-shadow] duration-300',
                       isActive
@@ -3864,6 +4360,36 @@ endif`}
           </main>
         </div>
       </div>
+
+      {isRecoveryPromptOpen && recoverableGuestProfile && (
+        <ModalShell
+          title="Rejoin session?"
+          eyebrow="Refresh recovery"
+          footer={(
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={handleStartFreshSession}
+                className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+              >
+                Start new session
+              </button>
+              <button
+                type="button"
+                onClick={handleRejoinRecoverableSession}
+                className="frutiger-button px-5 py-3 text-sm uppercase tracking-[0.14em]"
+              >
+                Rejoin session
+              </button>
+            </div>
+          )}
+        >
+          <div className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 text-sm font-semibold leading-6 text-[var(--text-secondary)] sm:text-base">
+            Do you want to rejoin the previous session of{' '}
+            <span className="font-black text-[var(--text-primary)]">{recoverableGuestProfile.name}</span>?
+          </div>
+        </ModalShell>
+      )}
 
       {isRoomSettingsOpen && (
         <ModalShell
@@ -3953,14 +4479,19 @@ endif`}
             </section>
 
             <section className="rentz-ruleset-grid-wrap overflow-x-auto rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-3">
-              <table className="rentz-ruleset-grid w-full min-w-[44rem]">
+              <table className="rentz-ruleset-grid w-full">
                 <thead>
                   <tr>
                     <th className="rentz-ruleset-header-cell text-left">Ruleset</th>
                     <th className="rentz-ruleset-header-cell text-center">Room</th>
                     {players.map((player) => (
-                      <th key={player.userId} className="rentz-ruleset-header-cell text-center">
-                        {getPlayerName(player)}
+                      <th
+                        key={player.userId}
+                        className="rentz-ruleset-header-cell text-center"
+                        data-short-label={getPlayerInitials(player)}
+                        title={getPlayerName(player)}
+                      >
+                        <span className="rentz-ruleset-player-name">{getPlayerName(player)}</span>
                       </th>
                     ))}
                   </tr>
@@ -4033,35 +4564,80 @@ endif`}
         <StatsOverlay
           stats={latestRoundStats}
           players={players}
-          canContinue={amIHost}
+          canContinue={canContinueRoundFromStats}
           matchComplete={matchCompletePending || gameFinished}
           onContinue={handleContinueMatch}
           onClose={() => setIsStatsOpen(false)}
         />
       )}
 
-      <nav className="mobile-tab-bar fixed bottom-3 left-2 right-2 z-50 sm:bottom-4 sm:left-3 sm:right-3 md:hidden">
-        <div className="glass-panel overflow-x-auto rounded-[1.9rem] border border-[var(--glass-border)] p-2 shadow-[0_20px_40px_rgba(0,0,0,0.2)]">
-          <div className="flex min-w-max gap-2">
-            {navItems.map((item) => {
+      <nav ref={mobileNavRef} className="mobile-tab-bar fixed bottom-3 left-2 right-2 z-50 sm:bottom-4 sm:left-3 sm:right-3 md:hidden">
+        {isMobileMoreOpen && mobileMoreNavItems.length > 0 && (
+          <div className="mobile-more-menu glass-panel absolute bottom-[calc(100%+0.7rem)] right-0 w-full rounded-[1.35rem] border border-[var(--glass-border)] p-2 shadow-[0_22px_44px_rgba(0,0,0,0.22)]">
+            <div className="grid gap-2">
+              {mobileMoreNavItems.map((item) => {
+                const isActive = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => handleNavSelect(item.id)}
+                    className={clsx(
+                      'flex min-h-[3.35rem] items-center gap-3 rounded-[1.05rem] px-3 text-left transition-[background-color,color,box-shadow]',
+                      isActive
+                        ? 'font-black text-[var(--nav-active-text)] shadow-[var(--nav-active-shadow)]'
+                        : 'font-bold text-[var(--text-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--text-primary)]'
+                    )}
+                    style={isActive ? { background: 'var(--nav-active-bg)' } : {}}
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    <span className="min-w-0 truncate text-xs uppercase tracking-[0.12em]">{item.label}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        <div className="mobile-tab-panel glass-panel rounded-[1.9rem] border border-[var(--glass-border)] p-2 shadow-[0_20px_40px_rgba(0,0,0,0.2)]">
+          <div className="grid grid-cols-4 gap-2">
+            {mobilePrimaryNavItems.map((item) => {
               const isActive = activeTab === item.id;
               return (
                 <button
                   key={item.id}
-                  onClick={() => setActiveTab(item.id)}
+                  type="button"
+                  onClick={() => handleNavSelect(item.id)}
                   className={clsx(
-                    'relative flex h-[4.5rem] min-w-[5rem] flex-col items-center justify-center gap-1 rounded-[1.45rem] px-3 transition-[transform,background-color,color,box-shadow] duration-300',
+                    'relative flex h-[4.5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-[1.45rem] px-1.5 transition-[transform,background-color,color,box-shadow] duration-300',
                     isActive ? '-translate-y-2 scale-105 text-[var(--nav-active-text)]' : 'text-[var(--text-secondary)]'
                   )}
                 >
                   {isActive && <div className="absolute inset-0 rounded-[1.45rem] shadow-[var(--nav-active-shadow)]" style={{ background: 'var(--nav-active-bg)' }} />}
                   <item.icon className="relative z-10 h-5 w-5 drop-shadow-md" />
-                  <span className="relative z-10 text-[11px] font-black uppercase tracking-[0.14em]">
+                  <span className="relative z-10 max-w-full truncate text-[10px] font-black uppercase tracking-[0.08em] sm:text-[11px] sm:tracking-[0.14em]">
                     {item.label}
                   </span>
                 </button>
               );
             })}
+            <button
+              type="button"
+              onClick={() => setIsMobileMoreOpen((current) => !current)}
+              className={clsx(
+                'relative flex h-[4.5rem] min-w-0 flex-col items-center justify-center gap-1 rounded-[1.45rem] px-1.5 transition-[transform,background-color,color,box-shadow] duration-300',
+                isMobileMoreActive || isMobileMoreOpen ? '-translate-y-2 scale-105 text-[var(--nav-active-text)]' : 'text-[var(--text-secondary)]'
+              )}
+              aria-expanded={isMobileMoreOpen}
+              aria-haspopup="menu"
+            >
+              {(isMobileMoreActive || isMobileMoreOpen) && (
+                <div className="absolute inset-0 rounded-[1.45rem] shadow-[var(--nav-active-shadow)]" style={{ background: 'var(--nav-active-bg)' }} />
+              )}
+              <MoreHorizontal className="relative z-10 h-5 w-5 drop-shadow-md" />
+              <span className="relative z-10 max-w-full truncate text-[10px] font-black uppercase tracking-[0.08em] sm:text-[11px] sm:tracking-[0.14em]">
+                More
+              </span>
+            </button>
           </div>
         </div>
       </nav>
