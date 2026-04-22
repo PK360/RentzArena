@@ -22,7 +22,7 @@ router.get('/ruleset-rater', async (_req, res, next) => {
   }
 });
 
-router.post('/parse', (req, res, next) => {
+function compileRulesetRequest(req, res, next) {
   try {
     const code = String(req.body.code || '');
     const type = String(req.body.type || 'per_round');
@@ -32,7 +32,10 @@ router.post('/parse', (req, res, next) => {
   } catch (error) {
     next(error);
   }
-});
+}
+
+router.post('/compile', compileRulesetRequest);
+router.post('/parse', compileRulesetRequest);
 
 router.post('/evaluate-preview', (req, res, next) => {
   try {

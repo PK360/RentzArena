@@ -4,8 +4,10 @@ const assert = require('node:assert');
 const {
   RULESETS,
   evaluateRulesetForTrick,
+  getAvailableRulesets,
   readRootRulesets
 } = require('../rulesets');
+const { compileRuleset } = require('../engine/evaluator');
 
 test('extracts default base rulesets from root room_rulesets.txt', () => {
   const rootRules = readRootRulesets();
@@ -82,4 +84,30 @@ test('scores Levate and Total composite rulesets deterministically', () => {
   });
   assert.strictEqual(totalMinus.delta, -270);
   assert.strictEqual(totalMinus.gameEnded, false);
+});
+
+test('includes room-scoped custom rulesets in availability and scoring', () => {
+  const customRulesets = [{
+    id: 'room_custom_hearts',
+    label: 'Heart Tax',
+    abbreviation: 'HT',
+    type: 'per_round',
+    source: 'room',
+    enabledByDefault: true,
+    code: 'add(-7 * HEART_NR, HEART_NR > 0)',
+    compiled: compileRuleset('add(-7 * HEART_NR, HEART_NR > 0)', 'per_round')
+  }];
+
+  assert.strictEqual(
+    getAvailableRulesets(customRulesets).some((ruleset) => ruleset.id === 'room_custom_hearts'),
+    true
+  );
+  assert.strictEqual(evaluateRulesetForTrick({
+    rulesetId: 'room_custom_hearts',
+    playerCount: 4,
+    initialPoints: 0,
+    handCards: ['2-H', 'K-H', 'A-S'],
+    nonDiscardedCards: [],
+    customRulesets
+  }).delta, -14);
 });

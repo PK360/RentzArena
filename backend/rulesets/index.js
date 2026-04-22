@@ -73,8 +73,20 @@ const DEFAULT_RULESET_SELECTIONS = Object.freeze(
   )
 );
 
-function getAvailableRulesets() {
-  return Object.values(RULESETS).map((definition) => ({
+function normalizeCustomRulesets(customRulesets = []) {
+  if (Array.isArray(customRulesets)) {
+    return customRulesets.filter((definition) => definition?.id && definition?.compiled);
+  }
+
+  if (customRulesets && typeof customRulesets === 'object') {
+    return Object.values(customRulesets).filter((definition) => definition?.id && definition?.compiled);
+  }
+
+  return [];
+}
+
+function serializeRulesetDefinition(definition) {
+  return {
     id: definition.id,
     label: definition.label,
     abbreviation: definition.abbreviation,
@@ -82,14 +94,40 @@ function getAvailableRulesets() {
     source: definition.source,
     composite: definition.composite || null,
     enabledByDefault: Boolean(definition.enabledByDefault)
-  }));
+  };
 }
 
-function sanitizeRulesetSelections(nextSelections = {}) {
-  return Object.keys(DEFAULT_RULESET_SELECTIONS).reduce((acc, key) => {
+function getRulesetDefinitions(customRulesets = []) {
+  return [
+    ...Object.values(RULESETS),
+    ...normalizeCustomRulesets(customRulesets)
+  ];
+}
+
+function getAvailableRulesets(customRulesets = []) {
+  return getRulesetDefinitions(customRulesets).map(serializeRulesetDefinition);
+}
+
+function getRulesetDefinitionById(rulesetId, customRulesets = []) {
+  return RULESETS[rulesetId] || normalizeCustomRulesets(customRulesets).find((definition) => definition.id === rulesetId) || null;
+}
+
+function getRulesetSelectionDefaults(customRulesets = []) {
+  return Object.fromEntries(
+    getRulesetDefinitions(customRulesets).map((definition) => [
+      definition.id,
+      definition.enabledByDefault !== false
+    ])
+  );
+}
+
+function sanitizeRulesetSelections(nextSelections = {}, customRulesets = []) {
+  const defaults = getRulesetSelectionDefaults(customRulesets);
+
+  return Object.keys(defaults).reduce((acc, key) => {
     acc[key] = typeof nextSelections[key] === 'boolean'
       ? nextSelections[key]
-      : DEFAULT_RULESET_SELECTIONS[key];
+      : defaults[key];
     return acc;
   }, {});
 }
@@ -141,8 +179,8 @@ function evaluateCompositeDelta({ definition, playerCount, handCards, nonDiscard
   };
 }
 
-function evaluateRulesetForTrick({ rulesetId, playerCount, initialPoints, handCards, nonDiscardedCards }) {
-  const definition = RULESETS[rulesetId];
+function evaluateRulesetForTrick({ rulesetId, playerCount, initialPoints, handCards, nonDiscardedCards, customRulesets = [] }) {
+  const definition = getRulesetDefinitionById(rulesetId, customRulesets);
   if (!definition) {
     throw new Error(`Unknown ruleset '${rulesetId}'`);
   }
@@ -182,6 +220,9 @@ module.exports = {
   TOTAL_BASE_RULE_IDS,
   evaluateRulesetForTrick,
   getAvailableRulesets,
+  getRulesetDefinitionById,
+  getRulesetDefinitions,
+  getRulesetSelectionDefaults,
   readRootRulesets,
   sanitizeRulesetSelections
 };

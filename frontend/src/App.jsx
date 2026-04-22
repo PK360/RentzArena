@@ -6,6 +6,7 @@ import {
   Clock,
   Copy,
   Crown,
+  Download,
   Droplet,
   FileCode2,
   Globe2,
@@ -21,6 +22,7 @@ import {
   Swords,
   Trash2,
   Trophy,
+  Upload,
   UserRound,
   Users,
   Users2,
@@ -121,6 +123,8 @@ const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
 );
 const DEFAULT_ROOM_VISIBILITY = 'public';
 const TURN_TIMER_RANGE = { min: 5, max: 60, defaultValue: 15 };
+const RULESET_TYPE_OPTIONS = new Set(['per_round', 'end_game']);
+const RENTZ_METADATA_KEYS = new Set(['long_name', 'short_name', 'title', 'name', 'abbreviation', 'abbr', 'type']);
 
 const VALUE_ORDER = ['A', 'K', 'Q', 'J', '10', '9', '8', '7', '6', '5', '4', '3', '2'];
 const SUIT_ORDER = ['H', 'S', 'D', 'C'];
@@ -153,6 +157,129 @@ function clampNumber(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+function buildRulesetShortNameFallback(longName) {
+  return Array.from(String(longName || 'Ruleset').replace(/\s+/g, '')).slice(0, 4).join('') || 'R';
+}
+
+function normalizeRulesetType(type) {
+  return RULESET_TYPE_OPTIONS.has(type) ? type : 'per_round';
+}
+
+function normalizeRentzMetadataKey(key) {
+  return String(key || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function parseRentzMetadataLine(line) {
+  const match = String(line || '').trim().match(/^(?:#\s*)?([^:=#]+?)\s*[:=]\s*(.*)$/);
+  if (!match) {
+    return null;
+  }
+
+  const key = normalizeRentzMetadataKey(match[1]);
+  if (!RENTZ_METADATA_KEYS.has(key)) {
+    return null;
+  }
+
+  return {
+    key,
+    value: match[2].trim()
+  };
+}
+
+function parseRentzRulesetText(sourceText) {
+  const normalizedText = String(sourceText || '').replace(/\r\n/g, '\n');
+  const lines = normalizedText.split('\n');
+  const metadata = {};
+  let index = 0;
+  let hasRentzHeader = false;
+
+  if (/^(?:#\s*)?Rentz Arena Ruleset\s*$/i.test(lines[0]?.trim() || '')) {
+    hasRentzHeader = true;
+    index = 1;
+  }
+
+  if (hasRentzHeader) {
+    while (index < lines.length) {
+      const trimmed = lines[index].trim();
+      if (!trimmed || trimmed === '#') {
+        index += 1;
+        break;
+      }
+
+      if (/^-{3,}$/.test(trimmed)) {
+        index += 1;
+        break;
+      }
+
+      const metadataEntry = parseRentzMetadataLine(lines[index]);
+      if (!metadataEntry) {
+        break;
+      }
+
+      metadata[metadataEntry.key] = metadataEntry.value;
+      index += 1;
+    }
+  }
+
+  if (!hasRentzHeader) {
+    let titleIndex = 0;
+    while (titleIndex < lines.length && !lines[titleIndex].trim()) {
+      titleIndex += 1;
+    }
+
+    const typeLine = lines[titleIndex + 1]?.trim() || '';
+    const typeMatch = typeLine.match(/^type:\s*([\w-]+)\s*$/i);
+    if (lines[titleIndex]?.trim() && typeMatch) {
+      const longName = lines[titleIndex].trim();
+      return {
+        longName,
+        shortName: buildRulesetShortNameFallback(longName),
+        type: normalizeRulesetType(typeMatch[1]),
+        code: lines.slice(titleIndex + 2).join('\n').trim()
+      };
+    }
+  }
+
+  const code = hasRentzHeader
+    ? lines.slice(index).join('\n').trim()
+    : normalizedText.trim();
+  const longName = metadata.long_name || metadata.title || metadata.name || 'Imported Ruleset';
+  const shortName = metadata.short_name || metadata.abbreviation || metadata.abbr || buildRulesetShortNameFallback(longName);
+
+  return {
+    longName,
+    shortName,
+    type: normalizeRulesetType(metadata.type),
+    code
+  };
+}
+
+function formatRentzRuleset({ longName, shortName, type, code }) {
+  const resolvedLongName = String(longName || '').trim() || 'Untitled Ruleset';
+  const resolvedShortName = String(shortName || '').trim() || buildRulesetShortNameFallback(resolvedLongName);
+
+  return [
+    '# Rentz Arena Ruleset',
+    `# long_name: ${resolvedLongName}`,
+    `# short_name: ${resolvedShortName}`,
+    `# type: ${normalizeRulesetType(type)}`,
+    '#',
+    String(code || '').trim(),
+    ''
+  ].join('\n');
+}
+
+function buildRulesetDownloadName(longName) {
+  const slug = String(longName || 'ruleset')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+
+  return `${slug || 'ruleset'}.rentz`;
+}
+
 function normalizeRoomSettings(roomSettings) {
   const availableRulesets = roomSettings?.availableRulesets?.length
     ? roomSettings.availableRulesets.map((option) => ({
@@ -163,7 +290,9 @@ function normalizeRoomSettings(roomSettings) {
   const selectedRulesets = availableRulesets.reduce((acc, option) => {
     acc[option.id] = typeof roomSettings?.selectedRulesets?.[option.id] === 'boolean'
       ? roomSettings.selectedRulesets[option.id]
-      : DEFAULT_ROOM_RULESET_SELECTIONS[option.id];
+      : (Object.prototype.hasOwnProperty.call(DEFAULT_ROOM_RULESET_SELECTIONS, option.id)
+        ? DEFAULT_ROOM_RULESET_SELECTIONS[option.id]
+        : option.enabledByDefault !== false);
     return acc;
   }, {});
   const rulesetPermissions = roomSettings?.rulesetPermissions && typeof roomSettings.rulesetPermissions === 'object'
@@ -1327,9 +1456,13 @@ function App() {
   const tableStageRef = useRef(null);
   const cardBoardRef = useRef(null);
   const handScrollRef = useRef(null);
+  const choiceHandScrollRef = useRef(null);
+  const editorImportInputRef = useRef(null);
+  const roomImportInputRef = useRef(null);
   const spectatorPopoverRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
+  const [editorShortName, setEditorShortName] = useState('MHR');
   const [editorType, setEditorType] = useState('per_round');
   const [editorCode, setEditorCode] = useState(
     'if(HEART_KING)\n  add(-100)\n  game_end()\nendif'
@@ -2003,10 +2136,21 @@ function App() {
     });
   };
 
-  const handleParseRules = async () => {
+  const getEditorRulesetPayload = () => {
+    const longName = editorTitle.trim() || 'Untitled Ruleset';
+
+    return {
+      longName,
+      shortName: editorShortName.trim() || buildRulesetShortNameFallback(longName),
+      type: normalizeRulesetType(editorType),
+      code: editorCode
+    };
+  };
+
+  const handleCompileRules = async () => {
     try {
-      setEditorStatus('Parsing ruleset...');
-      const response = await fetch('/api/rulesets/parse', {
+      setEditorStatus('Compiling ruleset...');
+      const response = await fetch('/api/rulesets/compile', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -2019,11 +2163,11 @@ function App() {
 
       const data = await response.json();
       if (!response.ok) {
-        throw new Error(data.error || 'Failed to parse ruleset');
+        throw new Error(data.error || 'Failed to compile ruleset');
       }
 
       setEditorAst(data.ast);
-      setEditorStatus('Ruleset parsed successfully.');
+      setEditorStatus('Ruleset compiled successfully.');
     } catch (error) {
       setEditorStatus(error.message);
       setEditorAst(null);
@@ -2031,16 +2175,126 @@ function App() {
   };
 
   const handleSaveDraft = () => {
+    const payload = getEditorRulesetPayload();
     const nextDraft = {
       id: `${Date.now()}`,
-      title: editorTitle || 'Untitled Ruleset',
-      type: editorType,
-      code: editorCode,
+      title: payload.longName,
+      shortName: payload.shortName,
+      type: payload.type,
+      code: payload.code,
       updatedAt: new Date().toISOString()
     };
 
     setRuleDrafts((current) => [nextDraft, ...current.filter((draft) => draft.title !== nextDraft.title)].slice(0, 10));
     setEditorStatus('Draft saved locally.');
+  };
+
+  const handleDownloadRentzRuleset = () => {
+    const payload = getEditorRulesetPayload();
+    const fileText = formatRentzRuleset(payload);
+    const blob = new Blob([fileText], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+
+    link.href = url;
+    link.download = buildRulesetDownloadName(payload.longName);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    setEditorStatus('Ruleset downloaded as .rentz.');
+  };
+
+  const readRentzFileFromInput = async (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+
+    if (!file) {
+      return null;
+    }
+
+    const sourceText = await file.text();
+    const ruleset = parseRentzRulesetText(sourceText);
+    if (!ruleset.code.trim()) {
+      throw new Error('Imported .rentz file does not contain ruleset code');
+    }
+
+    return ruleset;
+  };
+
+  const handleImportRentzToEditor = async (event) => {
+    try {
+      const importedRuleset = await readRentzFileFromInput(event);
+      if (!importedRuleset) {
+        return;
+      }
+
+      setEditorTitle(importedRuleset.longName);
+      setEditorShortName(importedRuleset.shortName);
+      setEditorType(importedRuleset.type);
+      setEditorCode(importedRuleset.code);
+      setEditorAst(null);
+      setEditorStatus('Ruleset imported.');
+    } catch (error) {
+      setEditorStatus(error.message);
+      setEditorAst(null);
+    }
+  };
+
+  const addRulesetToCurrentRoom = (rulesetPayload, { updateEditorStatus = false } = {}) => {
+    if (!activeProfile?.guest || !inLobby || !amIHost || gameStarted) {
+      const message = 'Only a guest host can add room rulesets before the match starts.';
+      if (updateEditorStatus) {
+        setEditorStatus(message);
+      }
+      showErrorMessage(message);
+      return;
+    }
+
+    if (updateEditorStatus) {
+      setEditorStatus('Compiling and applying ruleset...');
+    }
+
+    socket.emit('authenticate', activeProfile);
+    socket.emit('add_room_ruleset', {
+      roomId,
+      ruleset: rulesetPayload
+    }, (response) => {
+      if (response?.error) {
+        if (updateEditorStatus) {
+          setEditorStatus(response.error);
+          setEditorAst(null);
+        }
+        showErrorMessage(response.error);
+        return;
+      }
+
+      if (response?.lobby) {
+        applyLobbyState(response.lobby);
+      }
+
+      if (updateEditorStatus) {
+        setEditorStatus('Ruleset added to the current room.');
+      }
+      showTopPrompt(`${rulesetPayload.longName || 'Ruleset'} added to the room.`, 'success');
+    });
+  };
+
+  const handleApplyEditorRulesetToRoom = () => {
+    addRulesetToCurrentRoom(getEditorRulesetPayload(), { updateEditorStatus: true });
+  };
+
+  const handleImportRentzToRoom = async (event) => {
+    try {
+      const importedRuleset = await readRentzFileFromInput(event);
+      if (!importedRuleset) {
+        return;
+      }
+
+      addRulesetToCurrentRoom(importedRuleset);
+    } catch (error) {
+      showErrorMessage(error.message);
+    }
   };
 
   const handleCopyRoomCode = async () => {
@@ -2331,6 +2585,7 @@ function App() {
   const myPlayerId = players[myIndex]?.userId || activeLobbyPlayer?.userId || activeProfile?.userId;
   const myPlayer = players[myIndex] || activeLobbyPlayer || null;
   const amIHost = inLobby && lobbyHostId === activeProfile?.userId;
+  const canAddGuestRoomRulesets = Boolean(activeProfile?.guest && amIHost && !gameStarted);
   const amIReady = inLobby && !!activeLobbyPlayer?.isReady;
   const amISpectator = inLobby && !!mySpectatorProfile;
   const isMyTurn = gameStarted && !gameFinished && myIndex === turnIndex;
@@ -2340,6 +2595,8 @@ function App() {
   const isChoosingNv = gameStarted && choiceState?.phase === 'choosing_nv';
   const isChoosingRuleset = gameStarted && choiceState?.phase === 'choosing_ruleset';
   const isPlayingRound = gameStarted && !gameFinished && choiceState?.phase === 'playing_round';
+  const isRoundStatsPhase = gameStarted && !gameFinished && choiceState?.phase === 'round_stats';
+  const isRoundSetupPhase = gameStarted && !gameFinished && !isPlayingRound && !isRoundStatsPhase;
   const hasActiveModal = Boolean(
     (isRecoveryPromptOpen && recoverableGuestProfile) ||
     isRoomSettingsOpen ||
@@ -2545,8 +2802,10 @@ function App() {
     : localTablePlayer
       ? [localTablePlayer]
       : [];
-  const isTableStageVisible = activeTab === 'play' && inLobby && gameStarted && !gameFinished && playView === 'table';
-  const isHandSpreadVisible = isTableStageVisible;
+  const isTableStageVisible = activeTab === 'play' && inLobby && gameStarted && !gameFinished && !isRoundSetupPhase && playView === 'table';
+  const isChoiceHandSpreadVisible = isChoosingRuleset && !choiceState?.nvSelected && !isSpectatingGame;
+  const handSpreadLayoutMode = isChoiceHandSpreadVisible ? 'choice' : isTableStageVisible ? 'play' : 'hidden';
+  const isHandSpreadVisible = handSpreadLayoutMode !== 'hidden';
   const sortedHand = sortCards(hand);
   const fallbackHandSpreadMetrics = sortedHand.length > 0
     ? (() => {
@@ -2664,7 +2923,9 @@ function App() {
   }, [desktopSeatPlayers.length, isTableStageVisible, pageZoom]);
 
   useLayoutEffect(() => {
-    const scrollElement = handScrollRef.current;
+    const scrollElement = handSpreadLayoutMode === 'choice'
+      ? choiceHandScrollRef.current
+      : handScrollRef.current;
     const referenceHandSize = Math.max(startingHandSizeRef.current, startingHandSize);
 
     if (!isHandSpreadVisible || !scrollElement || referenceHandSize === 0) {
@@ -2765,7 +3026,7 @@ function App() {
       window.removeEventListener('resize', queueHandSpreadUpdate);
       resizeObserver?.disconnect();
     };
-  }, [hand.length, isHandSpreadVisible, pageZoom, startingHandSize]);
+  }, [hand.length, handSpreadLayoutMode, isHandSpreadVisible, pageZoom, startingHandSize]);
 
   const isCompactGameHeader = activeTab === 'play' && inLobby && gameStarted;
 
@@ -3225,6 +3486,28 @@ function App() {
       );
     }
 
+    if (isRoundSetupPhase) {
+      const setupPlayerName = getPlayerName(currentChooser);
+      const setupLabel = isChoosingNv
+        ? `${setupPlayerName} is choosing NV.`
+        : isChoosingRuleset
+          ? `${setupPlayerName} is choosing a game.`
+          : 'Preparing the round.';
+
+      return (
+        <div className="relative z-10 flex min-h-0 flex-1 items-center justify-center">
+          <section className="glass-panel max-w-md p-5 text-center sm:p-6" aria-live="polite">
+            <div className="text-[10px] font-extrabold uppercase tracking-[0.22em] text-[var(--text-secondary)]">
+              Round setup
+            </div>
+            <h3 className="mt-2 text-2xl font-display font-black text-[var(--text-primary)]">
+              {setupLabel}
+            </h3>
+          </section>
+        </div>
+      );
+    }
+
     if (playView === 'collected') {
       return (
         <div className="relative z-10 flex min-h-0 flex-1 flex-col gap-4">
@@ -3595,7 +3878,11 @@ function App() {
             </div>
           </div>
         )}
-        <div ref={handScrollRef} className="rentz-hand-scroll">
+        <div
+          ref={mode === 'choice' ? choiceHandScrollRef : handScrollRef}
+          className="rentz-hand-scroll"
+          data-rentz-modal-scroll={mode === 'choice' ? 'x' : undefined}
+        >
           <div
             className="rentz-hand-row"
             style={sortedHand.length > 0 && visibleHandSpreadMetrics ? { width: `${visibleHandSpreadMetrics.spreadWidth}px` } : undefined}
@@ -3721,18 +4008,20 @@ function App() {
         title={amIChooser ? 'Choose a game' : `${getPlayerName(currentChooser)} is choosing a game`}
         eyebrow={choiceState?.nvSelected ? 'NV selected' : 'Small game'}
         wide
-        overlayClassName="rentz-choice-overlay"
-        panelClassName="rentz-choice-panel"
+        overlayClassName={clsx('rentz-choice-overlay', showChoiceHand && 'has-choice-hand')}
+        panelClassName={clsx('rentz-choice-panel', showChoiceHand && 'has-choice-hand')}
         bodyClassName="rentz-choice-body"
         headerAside={(
           <div className={clsx('rentz-choice-status-pill', amIChooser ? 'is-active' : 'is-waiting')}>
             {amIChooser ? 'Your choice' : 'Waiting for chooser'}
           </div>
         )}
+        afterPanel={showChoiceHand ? (
+          <div className="rentz-choice-hand-stage" aria-label="Your hand preview">
+            {renderHandSpread({ mode: 'choice' })}
+          </div>
+        ) : null}
       >
-        <div className="rentz-choice-table-status">
-          {amIChooser ? 'Your highlighted column is active.' : `${chooserName} is choosing. Table actions are paused for you.`}
-        </div>
         <div className={clsx('rentz-choice-table-shell', !amIChooser && 'is-waiting')}>
           <div className="rentz-ruleset-grid-wrap rentz-choice-table-scroll overflow-x-auto" data-rentz-modal-scroll="y">
           <table className="rentz-ruleset-grid w-full">
@@ -3769,24 +4058,33 @@ function App() {
                     const used = Boolean(usedChoices?.[player.userId]?.[rule.id]);
                     const isChooserCell = player.userId === choiceState?.chooserId;
                     const canChoose = amIChooser && isChooserCell && globallyEnabled && allowed && !used;
+                    const choiceLabel = used ? 'Used' : globallyEnabled && allowed ? (isChooserCell ? 'Pick' : 'Open') : 'Off';
 
                     return (
-                      <td key={`${player.userId}-${rule.id}`}>
-                        <button
-                          type="button"
-                          disabled={!canChoose}
-                          onClick={() => handleChooseRuleset(rule.id)}
-                          className={clsx(
-                            'rentz-ruleset-choice-cell',
-                            canChoose && 'is-pickable',
-                            used && 'is-used',
-                            !used && globallyEnabled && allowed && !canChoose && 'is-open',
-                            (!globallyEnabled || !allowed) && 'is-disabled',
-                            isChooserCell && 'is-chooser-cell'
-                          )}
-                        >
-                          {used ? 'Used' : globallyEnabled && allowed ? (isChooserCell ? 'Pick' : 'Open') : 'Off'}
-                        </button>
+                      <td
+                        key={`${player.userId}-${rule.id}`}
+                        role={canChoose ? 'button' : undefined}
+                        tabIndex={canChoose ? 0 : undefined}
+                        aria-disabled={!canChoose || undefined}
+                        onClick={canChoose ? () => handleChooseRuleset(rule.id) : undefined}
+                        onKeyDown={canChoose
+                          ? (event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                              event.preventDefault();
+                              handleChooseRuleset(rule.id);
+                            }
+                          }
+                          : undefined}
+                        className={clsx(
+                          'rentz-ruleset-choice-td',
+                          canChoose && 'is-pickable',
+                          used && 'is-used',
+                          !used && globallyEnabled && allowed && !canChoose && 'is-open',
+                          (!globallyEnabled || !allowed) && 'is-disabled',
+                          isChooserCell && 'is-chooser-cell'
+                        )}
+                      >
+                        <span className="rentz-ruleset-choice-cell">{choiceLabel}</span>
                       </td>
                     );
                   })}
@@ -3795,19 +4093,12 @@ function App() {
             </tbody>
           </table>
           </div>
-        </div>
-        {showChoiceHand && (
-          <div className="rentz-choice-hand-dock">
-            <div className="rentz-choice-hand-title">Your hand</div>
-            <div className="rentz-choice-hand-static" data-rentz-modal-scroll="x">
-              {sortedHand.length > 0 ? sortedHand.map((card) => (
-                <Card key={`choice-${card}`} cardString={card} compact disabled />
-              )) : (
-                <div className="rentz-choice-hand-empty">Waiting for cards...</div>
-              )}
+          {!amIChooser && (
+            <div className="rentz-choice-table-status is-floating">
+              {chooserName} is choosing. Table actions are paused for you.
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </ModalShell>
     );
   };
@@ -3879,57 +4170,97 @@ function App() {
           <div className="status-pill px-4 py-2">{editorType.replace('_', ' ')}</div>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-[1fr_auto]">
-          <input
-            value={editorTitle}
-            onChange={(event) => setEditorTitle(event.target.value)}
-            className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-5 py-4 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
-            placeholder="Ruleset title"
-          />
-          <select
-            value={editorType}
-            onChange={(event) => setEditorType(event.target.value)}
-            className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-4 font-black text-[var(--text-primary)] shadow-inner focus:outline-none"
-          >
-            <option value="per_round">per_round</option>
-            <option value="end_game">end_game</option>
-          </select>
+        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(8rem,12rem)_auto]">
+          <label>
+            <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Long name</span>
+            <input
+              value={editorTitle}
+              onChange={(event) => setEditorTitle(event.target.value)}
+              className="w-full rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-5 py-4 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+              placeholder="King of Hearts"
+            />
+          </label>
+          <label>
+            <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Short name</span>
+            <input
+              value={editorShortName}
+              onChange={(event) => setEditorShortName(event.target.value)}
+              className="w-full rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-5 py-4 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+              placeholder="K♥"
+            />
+          </label>
+          <label>
+            <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Type</span>
+            <select
+              value={editorType}
+              onChange={(event) => setEditorType(event.target.value)}
+              className="w-full rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-4 font-black text-[var(--text-primary)] shadow-inner focus:outline-none"
+            >
+              <option value="per_round">per_round</option>
+              <option value="end_game">end_game</option>
+            </select>
+          </label>
         </div>
 
-        <textarea
-          value={editorCode}
-          onChange={(event) => setEditorCode(event.target.value)}
-          className="mt-4 min-h-[24rem] w-full rounded-[1.8rem] border border-[var(--glass-border)] bg-[#f8fff1]/75 px-5 py-4 font-mono text-sm leading-7 text-[#1f4023] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
-          spellCheck={false}
+        <div className="rentz-code-editor-shell mt-4">
+          <textarea
+            value={editorCode}
+            onChange={(event) => setEditorCode(event.target.value)}
+            className="rentz-code-editor-textarea"
+            spellCheck={false}
+          />
+        </div>
+
+        <input
+          ref={editorImportInputRef}
+          type="file"
+          accept=".rentz,text/plain"
+          onChange={handleImportRentzToEditor}
+          className="hidden"
         />
 
-        <div className="mt-4 flex flex-col gap-3 sm:flex-row">
-          <button onClick={handleParseRules} className="frutiger-button flex-1 py-4 text-lg">
-            Parse Ruleset
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          <button onClick={handleCompileRules} className="frutiger-button py-4 text-lg">
+            Compile Ruleset
           </button>
-          <button onClick={handleSaveDraft} className="ready-button flex-1 py-4 text-lg">
+          <button onClick={handleSaveDraft} className="ready-button py-4 text-lg">
             Save Draft
           </button>
-          <button onClick={() => setActiveTab('guide')} className="flex-1 rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
+          <button onClick={handleDownloadRentzRuleset} className="inline-flex items-center justify-center gap-2 rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
+            <Download className="h-5 w-5" />
+            Download .rentz
+          </button>
+          <button onClick={() => editorImportInputRef.current?.click()} className="inline-flex items-center justify-center gap-2 rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
+            <Upload className="h-5 w-5" />
+            Import .rentz
+          </button>
+          {canAddGuestRoomRulesets && (
+            <button onClick={handleApplyEditorRulesetToRoom} className="ready-button py-4 text-lg">
+              Apply to Room
+            </button>
+          )}
+          <button onClick={() => setActiveTab('guide')} className="rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
             View Guide
           </button>
         </div>
 
-        <div className="mt-4 rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">
-          {editorStatus || 'Use Parse Ruleset to validate the current script against the backend parser.'}
-        </div>
+        {editorStatus && (
+          <div className="mt-4 rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">
+            {editorStatus}
+          </div>
+        )}
       </section>
 
       <section className="space-y-5">
         <div className="glass-panel p-5 sm:p-6">
-          <h4 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)]">Parser Preview</h4>
+          <h4 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)]">Compiler Preview</h4>
           {editorAst ? (
             <pre className="max-h-[24rem] overflow-auto rounded-[1.3rem] bg-slate-950/80 p-4 text-xs text-lime-100">
               {JSON.stringify(editorAst, null, 2)}
             </pre>
           ) : (
             <p className="rounded-[1.3rem] border border-dashed border-[var(--glass-border)] bg-[var(--surface-subtle)] p-5 text-sm font-semibold text-[var(--text-secondary)]">
-              No AST preview yet. Parse the current code to inspect the backend output.
+              No compiled preview yet.
             </p>
           )}
         </div>
@@ -3947,6 +4278,7 @@ function App() {
                   key={draft.id}
                   onClick={() => {
                     setEditorTitle(draft.title);
+                    setEditorShortName(draft.shortName || buildRulesetShortNameFallback(draft.title));
                     setEditorType(draft.type);
                     setEditorCode(draft.code);
                     setActiveTab('editor');
@@ -4416,6 +4748,13 @@ endif`}
             </div>
           )}
         >
+          <input
+            ref={roomImportInputRef}
+            type="file"
+            accept=".rentz,text/plain"
+            onChange={handleImportRentzToRoom}
+            className="hidden"
+          />
           <div className="space-y-5">
             <section className="grid gap-4 lg:grid-cols-3">
               <label className="lg:col-span-1">
@@ -4478,6 +4817,38 @@ endif`}
               </div>
             </section>
 
+            {canAddGuestRoomRulesets && (
+              <section className="flex flex-col gap-3 rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h4 className="text-lg font-display font-black text-[var(--text-primary)]">Room Ruleset</h4>
+                  <div className="mt-1 text-xs font-extrabold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
+                    Guest host
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => roomImportInputRef.current?.click()}
+                    className="inline-flex items-center justify-center gap-2 rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+                  >
+                    <Upload className="h-4 w-4" />
+                    Import .rentz
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsRoomSettingsOpen(false);
+                      setActiveTab('editor');
+                    }}
+                    className="inline-flex items-center justify-center gap-2 rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+                  >
+                    <FileCode2 className="h-4 w-4" />
+                    Open Editor
+                  </button>
+                </div>
+              </section>
+            )}
+
             <section className="rentz-ruleset-grid-wrap overflow-x-auto rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-3">
               <table className="rentz-ruleset-grid w-full">
                 <thead>
@@ -4501,7 +4872,9 @@ endif`}
                     <tr key={option.id}>
                       <th className="rentz-ruleset-row-header text-left">
                         <div className="text-lg font-black text-[var(--text-primary)]">{option.abbreviation || option.label}</div>
-                        <div className="text-xs font-bold text-[var(--text-secondary)]">{option.label}</div>
+                        <div className="text-xs font-bold text-[var(--text-secondary)]">
+                          {option.label}{option.source === 'room' ? ' (room)' : ''}
+                        </div>
                       </th>
                       <td className="text-center">
                         <ToggleCheck

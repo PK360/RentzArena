@@ -4,11 +4,12 @@ const { randomFriendCode } = require('./utils/helpers');
 const { generateDeck, shuffle, dealCards } = require('./utils/cards');
 const {
   DEFAULT_RULESET_SELECTIONS,
-  RULESETS,
   evaluateRulesetForTrick,
   getAvailableRulesets,
+  getRulesetDefinitionById,
   sanitizeRulesetSelections
 } = require('./rulesets');
+const { compileRuleset } = require('./engine/evaluator');
 
 // In-memory lobby management
 const lobbies = new Map(); // roomId -> Set(socketIds)
@@ -22,6 +23,11 @@ const ROOM_VISIBILITIES = new Set(['public', 'private']);
 const DEFAULT_TURN_TIMER_SECONDS = 15;
 const TURN_TIMER_RANGE = { min: 5, max: 60 };
 const DISCONNECT_GRACE_MS = 120000;
+const ROOM_CUSTOM_RULESET_LIMIT = 20;
+const ROOM_RULESET_NAME_MAX_LENGTH = 80;
+const ROOM_RULESET_ABBREVIATION_MAX_LENGTH = 12;
+const ROOM_RULESET_CODE_MAX_LENGTH = 20000;
+const RULESET_TYPES = new Set(['per_round', 'end_game']);
 const SUIT_NAMES = {
   H: 'Hearts',
   D: 'Diamonds',
@@ -31,12 +37,13 @@ const SUIT_NAMES = {
 
 function serializeRoomSettings(lobby) {
   return {
-    availableRulesets: getAvailableRulesets(),
-    selectedRulesets: sanitizeRulesetSelections(lobby?.selectedRulesets),
+    availableRulesets: getAvailableRulesets(lobby?.customRulesets),
+    selectedRulesets: sanitizeRulesetSelections(lobby?.selectedRulesets, lobby?.customRulesets),
     rulesetPermissions: sanitizeRulesetPermissions(
       lobby?.rulesetPermissions,
       lobby?.players || [],
-      lobby?.selectedRulesets
+      lobby?.selectedRulesets,
+      lobby?.customRulesets
     ),
     nvAllowed: lobby?.nvAllowed ?? true,
     turnTimerSeconds: sanitizeTurnTimerSeconds(lobby?.turnTimerSeconds),
@@ -177,6 +184,106 @@ function sanitizeRoomName(roomName, user) {
   return trimmedName || getDefaultRoomName(user);
 }
 
+function sanitizeRulesetTextField(value, fallback, maxLength) {
+  const trimmed = String(value || '').trim();
+  const resolved = trimmed || fallback;
+  return resolved.slice(0, maxLength);
+}
+
+function buildRulesetAbbreviationFallback(label) {
+  const compactLabel = Array.from(String(label || '').replace(/\s+/g, ''));
+  return compactLabel.slice(0, 4).join('') || 'R';
+}
+
+function buildRoomRulesetId(lobby) {
+  let nextId = '';
+
+  do {
+    nextId = `room_${randomFriendCode().toLowerCase()}_${Date.now().toString(36)}`;
+  } while (getRulesetDefinitionById(nextId, lobby.customRulesets));
+
+  return nextId;
+}
+
+function createRoomRulesetDefinition(lobby, payload = {}) {
+  const label = sanitizeRulesetTextField(
+    payload.longName ?? payload.title ?? payload.label,
+    'Untitled Ruleset',
+    ROOM_RULESET_NAME_MAX_LENGTH
+  );
+  const abbreviation = sanitizeRulesetTextField(
+    payload.shortName ?? payload.abbreviation,
+    buildRulesetAbbreviationFallback(label),
+    ROOM_RULESET_ABBREVIATION_MAX_LENGTH
+  );
+  const type = String(payload.type || 'per_round').trim();
+  const code = String(payload.code || '').trim();
+
+  if (!RULESET_TYPES.has(type)) {
+    throw new Error(`Unsupported ruleset type '${type}'`);
+  }
+
+  if (!code) {
+    throw new Error('Ruleset code is required');
+  }
+
+  if (code.length > ROOM_RULESET_CODE_MAX_LENGTH) {
+    throw new Error(`Ruleset code must be ${ROOM_RULESET_CODE_MAX_LENGTH} characters or less`);
+  }
+
+  return {
+    id: buildRoomRulesetId(lobby),
+    label,
+    abbreviation,
+    type,
+    code,
+    source: 'room',
+    enabledByDefault: true,
+    createdBy: lobby.hostId,
+    createdAt: Date.now(),
+    compiled: compileRuleset(code, type)
+  };
+}
+
+function addCustomRulesetToLobby(lobby, payload = {}) {
+  lobby.customRulesets = Array.isArray(lobby.customRulesets) ? lobby.customRulesets : [];
+
+  if (lobby.customRulesets.length >= ROOM_CUSTOM_RULESET_LIMIT) {
+    return { error: `A room can have at most ${ROOM_CUSTOM_RULESET_LIMIT} custom rulesets` };
+  }
+
+  let definition;
+  try {
+    definition = createRoomRulesetDefinition(lobby, payload);
+  } catch (error) {
+    return { error: error.message };
+  }
+
+  lobby.customRulesets.push(definition);
+  lobby.selectedRulesets = sanitizeRulesetSelections(
+    {
+      ...lobby.selectedRulesets,
+      [definition.id]: true
+    },
+    lobby.customRulesets
+  );
+  const nextPermissions = { ...(lobby.rulesetPermissions || {}) };
+  lobby.players.forEach((player) => {
+    nextPermissions[player.userId] = {
+      ...(nextPermissions[player.userId] || {}),
+      [definition.id]: true
+    };
+  });
+  lobby.rulesetPermissions = sanitizeRulesetPermissions(
+    nextPermissions,
+    lobby.players,
+    lobby.selectedRulesets,
+    lobby.customRulesets
+  );
+
+  return { definition };
+}
+
 function getAvatarSource(member) {
   return (
     member?.avatarUrl ||
@@ -188,20 +295,20 @@ function getAvatarSource(member) {
   );
 }
 
-function createDefaultPermissionsForPlayer() {
-  return Object.keys(DEFAULT_RULESET_SELECTIONS).reduce((acc, ruleId) => {
+function createDefaultPermissionsForPlayer(customRulesets = []) {
+  return Object.keys(sanitizeRulesetSelections({}, customRulesets)).reduce((acc, ruleId) => {
     acc[ruleId] = true;
     return acc;
   }, {});
 }
 
-function sanitizeRulesetPermissions(nextPermissions = {}, players = [], selectedRulesets = DEFAULT_RULESET_SELECTIONS) {
-  const sanitizedSelections = sanitizeRulesetSelections(selectedRulesets);
+function sanitizeRulesetPermissions(nextPermissions = {}, players = [], selectedRulesets = DEFAULT_RULESET_SELECTIONS, customRulesets = []) {
+  const sanitizedSelections = sanitizeRulesetSelections(selectedRulesets, customRulesets);
 
   return players.reduce((acc, player) => {
     const playerPermissions = nextPermissions?.[player.userId] || {};
 
-    acc[player.userId] = Object.keys(DEFAULT_RULESET_SELECTIONS).reduce((ruleAcc, ruleId) => {
+    acc[player.userId] = Object.keys(sanitizedSelections).reduce((ruleAcc, ruleId) => {
       ruleAcc[ruleId] = typeof playerPermissions[ruleId] === 'boolean'
         ? playerPermissions[ruleId]
         : true;
@@ -219,7 +326,8 @@ function ensureRulesetPermissionsForPlayers(lobby) {
   lobby.rulesetPermissions = sanitizeRulesetPermissions(
     lobby.rulesetPermissions,
     lobby.players,
-    lobby.selectedRulesets
+    lobby.selectedRulesets,
+    lobby.customRulesets
   );
 }
 
@@ -314,7 +422,7 @@ function addMemberToLobby(lobby, user, socketId, { isReady = false } = {}) {
 
   if (role === 'player') {
     lobby.players.push(member);
-    lobby.rulesetPermissions[member.userId] = createDefaultPermissionsForPlayer();
+    lobby.rulesetPermissions[member.userId] = createDefaultPermissionsForPlayer(lobby.customRulesets);
     ensureRulesetPermissionsForPlayers(lobby);
   } else {
     lobby.spectators.push(member);
@@ -355,7 +463,7 @@ function setLobbyMemberRole(lobby, socketId, nextRole) {
       isReady: false,
       role: 'player'
     });
-    lobby.rulesetPermissions[member.userId] = createDefaultPermissionsForPlayer();
+    lobby.rulesetPermissions[member.userId] = createDefaultPermissionsForPlayer(lobby.customRulesets);
     ensureRulesetPermissionsForPlayers(lobby);
 
     return { assignedRole: 'player', changed: true };
@@ -402,13 +510,13 @@ function getStartGameValidationError(lobby, user) {
     return 'Not all players are ready';
   }
 
-  const selectedRulesets = sanitizeRulesetSelections(lobby.selectedRulesets);
+  const selectedRulesets = sanitizeRulesetSelections(lobby.selectedRulesets, lobby.customRulesets);
   const hasSelectedRuleset = Object.values(selectedRulesets).some(Boolean);
   if (!hasSelectedRuleset) {
     return 'At least one ruleset must be enabled';
   }
 
-  const permissions = sanitizeRulesetPermissions(lobby.rulesetPermissions, lobby.players, selectedRulesets);
+  const permissions = sanitizeRulesetPermissions(lobby.rulesetPermissions, lobby.players, selectedRulesets, lobby.customRulesets);
   const hasAllowedChoice = lobby.players.some((player) => (
     Object.entries(permissions[player.userId] || {}).some(([ruleId, allowed]) => selectedRulesets[ruleId] && allowed)
   ));
@@ -420,13 +528,13 @@ function getStartGameValidationError(lobby, user) {
 }
 
 function getEligibleRuleIdsForPlayer(game, playerId) {
-  const selections = sanitizeRulesetSelections(game.selectedRulesets);
+  const selections = sanitizeRulesetSelections(game.selectedRulesets, game.customRulesets);
   const playerPermissions = game.rulesetPermissions?.[playerId] || {};
   const usedByPlayer = game.usedChoices?.[playerId] || {};
 
   return Object.keys(selections).filter((ruleId) => (
     selections[ruleId] &&
-    RULESETS[ruleId] &&
+    getRulesetDefinitionById(ruleId, game.customRulesets) &&
     playerPermissions[ruleId] !== false &&
     !usedByPlayer[ruleId]
   ));
@@ -466,10 +574,10 @@ function serializeChoiceState(game) {
     nvSelected: Boolean(game.nvSelected),
     activeRulesetId: game.activeRulesetId || null,
     usedChoices: game.usedChoices || {},
-    selectedRulesets: sanitizeRulesetSelections(game.selectedRulesets),
+    selectedRulesets: sanitizeRulesetSelections(game.selectedRulesets, game.customRulesets),
     rulesetPermissions: game.rulesetPermissions || {},
     timerDeadline: game.timerDeadline || null,
-    availableRulesets: getAvailableRulesets()
+    availableRulesets: getAvailableRulesets(game.customRulesets)
   };
 }
 
@@ -618,7 +726,7 @@ function buildRankMap(standings) {
 }
 
 function createRoundStats(game) {
-  const ruleset = RULESETS[game.activeRulesetId];
+  const ruleset = getRulesetDefinitionById(game.activeRulesetId, game.customRulesets);
   const previousPoints = { ...game.pointsByPlayer };
 
   game.roundStats = {
@@ -656,7 +764,7 @@ function finalizeRoundStats(game) {
 }
 
 function applyActiveRulesetToTrick({ game, playerId, handCards }) {
-  if (!game.activeRulesetId || !RULESETS[game.activeRulesetId]) {
+  if (!game.activeRulesetId || !getRulesetDefinitionById(game.activeRulesetId, game.customRulesets)) {
     return { gameEnded: false, scoreDelta: 0 };
   }
 
@@ -667,7 +775,8 @@ function applyActiveRulesetToTrick({ game, playerId, handCards }) {
     playerCount: game.players.length,
     initialPoints: previousPoints,
     handCards,
-    nonDiscardedCards
+    nonDiscardedCards,
+    customRulesets: game.customRulesets
   });
   const multiplier = game.nvSelected ? 2 : 1;
   const scoreDelta = result.delta * multiplier;
@@ -823,7 +932,7 @@ function selectRulesetForRound(io, roomId, game, playerId, rulesetId) {
 
   const stateVersion = bumpGameStateVersion(game);
   io.to(roomId).emit('small_game_started', {
-    message: `${game.roundStats.chooserName} has chosen ${RULESETS[rulesetId].label}${game.nvSelected ? ' (NV)!' : ''}`,
+    message: `${game.roundStats.chooserName} has chosen ${getRulesetDefinitionById(rulesetId, game.customRulesets)?.label || 'a game'}${game.nvSelected ? ' (NV)!' : ''}`,
     choiceState: serializeChoiceState(game),
     currentTrick: game.currentTrick,
     turnIndex: game.turnIndex,
@@ -1228,6 +1337,7 @@ function attachSocketManager(io) {
         players: [hostMember],
         spectators: [],
         rulesetId: rulesetId || null,
+        customRulesets: [],
         selectedRulesets,
         rulesetPermissions: {
           [user.userId]: createDefaultPermissionsForPlayer()
@@ -1358,10 +1468,29 @@ function attachSocketManager(io) {
       lobby.visibility = sanitizeRoomVisibility(visibility ?? lobby.visibility);
       lobby.nvAllowed = typeof nvAllowed === 'boolean' ? nvAllowed : Boolean(lobby.nvAllowed);
       lobby.turnTimerSeconds = sanitizeTurnTimerSeconds(turnTimerSeconds ?? lobby.turnTimerSeconds);
-      lobby.selectedRulesets = sanitizeRulesetSelections(selectedRulesets);
-      lobby.rulesetPermissions = sanitizeRulesetPermissions(rulesetPermissions, lobby.players, lobby.selectedRulesets);
+      lobby.selectedRulesets = sanitizeRulesetSelections(selectedRulesets, lobby.customRulesets);
+      lobby.rulesetPermissions = sanitizeRulesetPermissions(rulesetPermissions, lobby.players, lobby.selectedRulesets, lobby.customRulesets);
       emitLobbyUpdate(io, roomId, lobby);
       callback({ success: true, lobby: serializeLobby(lobby) });
+    });
+
+    socket.on('add_room_ruleset', ({ roomId, ruleset } = {}, callback = () => {}) => {
+      const lobby = lobbies.get(roomId);
+      const user = socketToUser.get(socket.id);
+
+      if (!lobby) return callback({ error: 'Lobby not found' });
+      if (!user) return callback({ error: 'Not authenticated' });
+      if (!user.guest) return callback({ error: 'Only guest hosts can add room rulesets' });
+      if (lobby.status !== 'waiting') return callback({ error: 'Room rulesets can only be added before the match starts' });
+      if (lobby.hostId !== user.userId) return callback({ error: 'Only the host can add room rulesets' });
+
+      const result = addCustomRulesetToLobby(lobby, ruleset);
+      if (result.error) {
+        return callback({ error: result.error });
+      }
+
+      emitLobbyUpdate(io, roomId, lobby, `${result.definition.label} added to the room`);
+      callback({ success: true, ruleset: result.definition, lobby: serializeLobby(lobby) });
     });
 
     socket.on('transfer_host', ({ roomId, targetUserId }, callback = () => {}) => {
@@ -1455,8 +1584,9 @@ function attachSocketManager(io) {
         roomName: lobby.roomName,
         hostId: lobby.hostId,
         rulesetId: lobby.rulesetId,
-        selectedRulesets: sanitizeRulesetSelections(lobby.selectedRulesets),
-        rulesetPermissions: sanitizeRulesetPermissions(lobby.rulesetPermissions, lobby.players, lobby.selectedRulesets),
+        customRulesets: (lobby.customRulesets || []).map((definition) => ({ ...definition })),
+        selectedRulesets: sanitizeRulesetSelections(lobby.selectedRulesets, lobby.customRulesets),
+        rulesetPermissions: sanitizeRulesetPermissions(lobby.rulesetPermissions, lobby.players, lobby.selectedRulesets, lobby.customRulesets),
         nvAllowed: Boolean(lobby.nvAllowed),
         turnTimerSeconds: sanitizeTurnTimerSeconds(lobby.turnTimerSeconds),
         players: lobby.players.map((player) => ({
@@ -1537,7 +1667,7 @@ function attachSocketManager(io) {
             playerPoints: buildPointTotals(gameState),
             collectedHandsByPlayer: buildCollectedHands(gameState),
             choiceState: serializeChoiceState(gameState),
-            availableRulesets: getAvailableRulesets()
+            availableRulesets: getAvailableRulesets(gameState.customRulesets)
           });
         });
 
@@ -1554,7 +1684,7 @@ function attachSocketManager(io) {
             playerPoints: buildPointTotals(gameState),
             collectedHandsByPlayer: buildCollectedHands(gameState),
             choiceState: serializeChoiceState(gameState),
-            availableRulesets: getAvailableRulesets()
+            availableRulesets: getAvailableRulesets(gameState.customRulesets)
           });
         });
 
