@@ -20,8 +20,8 @@ const MIN_PLAYERS_TO_START = 2;
 const MAX_ACTIVE_PLAYERS = 6;
 const DEFAULT_ROOM_VISIBILITY = 'public';
 const ROOM_VISIBILITIES = new Set(['public', 'private']);
-const DEFAULT_TURN_TIMER_SECONDS = 15;
-const TURN_TIMER_RANGE = { min: 5, max: 60 };
+const DEFAULT_TURN_TIMER_SECONDS = 45;
+const TURN_TIMER_RANGE = { min: 15, max: 300 };
 const DISCONNECT_GRACE_MS = 120000;
 const ROOM_CUSTOM_RULESET_LIMIT = 20;
 const ROOM_RULESET_NAME_MAX_LENGTH = 80;
@@ -129,6 +129,19 @@ function emitLobbyUpdate(io, roomId, lobby, message) {
     ...serializeLobby(lobby),
     ...(message ? { message } : {})
   });
+}
+
+function closeWaitingLobby(io, roomId, lobby, { reason = 'The room was deleted', deletedBy = null } = {}) {
+  clearLobbyDisconnects(roomId, lobby);
+  io.to(roomId).emit('lobby_deleted', {
+    roomId,
+    reason,
+    ...(deletedBy ? { deletedBy } : {})
+  });
+  getAllLobbyMembers(lobby).forEach((member) => {
+    io.sockets.sockets.get(member.socketId)?.leave(roomId);
+  });
+  lobbies.delete(roomId);
 }
 
 function getAllLobbyMembers(lobby) {
@@ -358,6 +371,43 @@ function updateLobbyMemberSocket(lobby, user, socketId) {
   member.displayName = user.displayName || member.displayName;
   member.isConnected = true;
   return member;
+}
+
+function removeWaitingLobbyMember(lobby, targetUserId) {
+  lobby.rulesetPermissions = lobby.rulesetPermissions || {};
+
+  const playerIndex = lobby.players.findIndex((player) => player.userId === targetUserId);
+  const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.userId === targetUserId);
+  const collection = playerIndex !== -1 ? lobby.players : lobby.spectators;
+  const index = playerIndex !== -1 ? playerIndex : spectatorIndex;
+
+  if (index === -1) {
+    return null;
+  }
+
+  const previousHostId = lobby.hostId || null;
+  const [member] = collection.splice(index, 1);
+  delete lobby.rulesetPermissions[member.userId];
+
+  const remainingPlayerCount = lobby.players.length;
+  const remainingMemberCount = getAllLobbyMembers(lobby).length;
+  const shouldDeleteRoom = remainingPlayerCount === 0;
+
+  if (previousHostId === member.userId) {
+    lobby.hostId = getNextHostId(lobby);
+  }
+
+  ensureRulesetPermissionsForPlayers(lobby);
+
+  return {
+    member,
+    previousHostId,
+    nextHostId: lobby.hostId || null,
+    hostChanged: previousHostId === member.userId && lobby.hostId && lobby.hostId !== previousHostId,
+    remainingPlayerCount,
+    remainingMemberCount,
+    shouldDeleteRoom
+  };
 }
 
 function findCurrentRoomForUser(user) {
@@ -984,26 +1034,15 @@ function continueAfterRound(io, roomId, game) {
 }
 
 function removeMemberFromLobby(io, roomId, lobby, targetUserId, reason = 'Removed from room') {
-  const playerIndex = lobby.players.findIndex((player) => player.userId === targetUserId);
-  const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.userId === targetUserId);
-  const collection = playerIndex !== -1 ? lobby.players : lobby.spectators;
-  const index = playerIndex !== -1 ? playerIndex : spectatorIndex;
-
-  if (index === -1) {
+  const outcome = removeWaitingLobbyMember(lobby, targetUserId);
+  if (!outcome) {
     return null;
   }
 
-  const [member] = collection.splice(index, 1);
+  const { member } = outcome;
   clearPendingLobbyDisconnect(roomId, member.userId);
-  delete lobby.rulesetPermissions[member.userId];
   io.to(member.socketId).emit('lobby_removed', { roomId, reason });
   io.sockets.sockets.get(member.socketId)?.leave(roomId);
-
-  if (lobby.hostId === member.userId) {
-    lobby.hostId = getNextHostId(lobby);
-  }
-
-  ensureRulesetPermissionsForPlayers(lobby);
   return member;
 }
 
@@ -1032,27 +1071,27 @@ function abandonUserSession(io, socket, user) {
     return { success: true };
   }
 
-  const playerIndex = lobby.players.findIndex((player) => player.userId === user.userId);
-  const spectatorIndex = lobby.spectators.findIndex((spectator) => spectator.userId === user.userId);
-
-  if (playerIndex !== -1) {
-    const [removed] = lobby.players.splice(playerIndex, 1);
-    delete lobby.rulesetPermissions[removed.userId];
-  } else if (spectatorIndex !== -1) {
-    lobby.spectators.splice(spectatorIndex, 1);
-  }
-
-  if (getAllLobbyMembers(lobby).length === 0) {
-    lobbies.delete(roomId);
+  const outcome = removeWaitingLobbyMember(lobby, user.userId);
+  if (!outcome) {
     return { success: true };
   }
 
-  if (lobby.hostId === user.userId) {
-    lobby.hostId = getNextHostId(lobby);
+  if (outcome.shouldDeleteRoom) {
+    closeWaitingLobby(io, roomId, lobby, {
+      reason: 'The room closed because no active players remained.'
+    });
+    return { success: true };
   }
 
-  ensureRulesetPermissionsForPlayers(lobby);
-  emitLobbyUpdate(io, roomId, lobby, 'A player left');
+  const nextHost = outcome.nextHostId ? getMemberByUserId(lobby, outcome.nextHostId) : null;
+  emitLobbyUpdate(
+    io,
+    roomId,
+    lobby,
+    outcome.hostChanged && nextHost
+      ? `${getUserDisplayName(outcome.member)} left the room. ${getUserDisplayName(nextHost)} is now host.`
+      : `${getUserDisplayName(outcome.member)} left the room.`
+  );
   return { success: true };
 }
 
@@ -1073,27 +1112,27 @@ function scheduleWaitingLobbyDisconnectCleanup(io, roomId, lobby, member, discon
       return;
     }
 
-    const playerIndex = currentLobby.players.findIndex((player) => player.userId === member.userId);
-    const spectatorIndex = currentLobby.spectators.findIndex((spectator) => spectator.userId === member.userId);
-
-    if (playerIndex !== -1) {
-      const [removed] = currentLobby.players.splice(playerIndex, 1);
-      delete currentLobby.rulesetPermissions[removed.userId];
-    } else if (spectatorIndex !== -1) {
-      currentLobby.spectators.splice(spectatorIndex, 1);
-    }
-
-    if (getAllLobbyMembers(currentLobby).length === 0) {
-      lobbies.delete(roomId);
+    const outcome = removeWaitingLobbyMember(currentLobby, member.userId);
+    if (!outcome) {
       return;
     }
 
-    if (currentLobby.hostId === member.userId) {
-      currentLobby.hostId = getNextHostId(currentLobby);
+    if (outcome.shouldDeleteRoom) {
+      closeWaitingLobby(io, roomId, currentLobby, {
+        reason: 'The room closed because no active players remained.'
+      });
+      return;
     }
 
-    ensureRulesetPermissionsForPlayers(currentLobby);
-    emitLobbyUpdate(io, roomId, currentLobby, 'A player left');
+    const nextHost = outcome.nextHostId ? getMemberByUserId(currentLobby, outcome.nextHostId) : null;
+    emitLobbyUpdate(
+      io,
+      roomId,
+      currentLobby,
+      outcome.hostChanged && nextHost
+        ? `${getUserDisplayName(outcome.member)} left the room. ${getUserDisplayName(nextHost)} is now host.`
+        : `${getUserDisplayName(outcome.member)} left the room.`
+    );
   }, DISCONNECT_GRACE_MS);
 
   timeoutId.unref?.();
@@ -1447,6 +1486,51 @@ function attachSocketManager(io) {
       });
     });
 
+    socket.on('leave_lobby', ({ roomId }, callback = () => {}) => {
+      const lobby = lobbies.get(roomId);
+      const user = socketToUser.get(socket.id);
+
+      if (!lobby) return callback({ error: 'Lobby not found' });
+      if (!user) return callback({ error: 'Not authenticated' });
+      if (lobby.status !== 'waiting') return callback({ error: 'You can only leave before the match starts' });
+
+      const outcome = removeWaitingLobbyMember(lobby, user.userId);
+      if (!outcome) return callback({ error: 'You are not in this lobby' });
+
+      clearPendingLobbyDisconnect(roomId, user.userId);
+      socket.leave(roomId);
+
+      if (outcome.shouldDeleteRoom) {
+        closeWaitingLobby(io, roomId, lobby, {
+          reason: 'The room closed because no active players remained.'
+        });
+        return callback({
+          success: true,
+          roomDeleted: true,
+          message: 'You left the room. It closed because no active players remained.'
+        });
+      }
+
+      const nextHost = outcome.nextHostId ? getMemberByUserId(lobby, outcome.nextHostId) : null;
+      emitLobbyUpdate(
+        io,
+        roomId,
+        lobby,
+        outcome.hostChanged && nextHost
+          ? `${getUserDisplayName(outcome.member)} left the room. ${getUserDisplayName(nextHost)} is now host.`
+          : `${getUserDisplayName(outcome.member)} left the room.`
+      );
+
+      callback({
+        success: true,
+        roomDeleted: false,
+        nextHostId: outcome.nextHostId,
+        message: outcome.hostChanged && nextHost
+          ? `You left the room. ${getUserDisplayName(nextHost)} is now host.`
+          : 'You left the room.'
+      });
+    });
+
     socket.on('update_room_settings', ({
       roomId,
       roomName,
@@ -1555,12 +1639,10 @@ function attachSocketManager(io) {
       if (lobby.status !== 'waiting') return callback({ error: 'Rooms can only be deleted before the match starts' });
       if (lobby.hostId !== user.userId) return callback({ error: 'Only the host can delete the room' });
 
-      clearLobbyDisconnects(roomId, lobby);
-      io.to(roomId).emit('lobby_deleted', { roomId, reason: 'The host deleted the room', deletedBy: user.userId });
-      getAllLobbyMembers(lobby).forEach((member) => {
-        io.sockets.sockets.get(member.socketId)?.leave(roomId);
+      closeWaitingLobby(io, roomId, lobby, {
+        reason: 'The host deleted the room',
+        deletedBy: user.userId
       });
-      lobbies.delete(roomId);
       callback({ success: true });
     });
 
@@ -1786,5 +1868,6 @@ module.exports.bumpGameStateVersion = bumpGameStateVersion;
 module.exports.buildPublicRoomSummary = buildPublicRoomSummary;
 module.exports.findNextChooser = findNextChooser;
 module.exports.getEligibleRuleIdsForPlayer = getEligibleRuleIdsForPlayer;
+module.exports.removeWaitingLobbyMember = removeWaitingLobbyMember;
 module.exports.sanitizeRulesetPermissions = sanitizeRulesetPermissions;
 module.exports.sanitizeTurnTimerSeconds = sanitizeTurnTimerSeconds;

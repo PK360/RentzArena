@@ -345,6 +345,120 @@
     scrollbar-gutter: stable;
   }
 
+  .rentz-editor-actions {
+    display: grid;
+    gap: 0.9rem;
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  }
+
+  .rentz-editor-action {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 0.9rem;
+    min-height: 5.6rem;
+    border: 1px solid rgba(255,255,255,0.76);
+    border-radius: 1.45rem;
+    background:
+      linear-gradient(135deg, rgba(245,249,252,0.88) 0%, rgba(220,231,239,0.9) 56%, rgba(207,220,232,0.9) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.95),
+      inset 0 -1px 0 rgba(148,163,184,0.18),
+      0 16px 30px rgba(15,23,42,0.1);
+    color: var(--text-primary);
+    overflow: hidden;
+    padding: 1rem 1.05rem;
+    text-align: left;
+    transition:
+      transform 0.2s ease,
+      box-shadow 0.2s ease,
+      border-color 0.2s ease,
+      background 0.2s ease;
+  }
+
+  .rentz-editor-action:hover {
+    transform: translateY(-2px);
+    border-color: rgba(255,255,255,0.9);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.98),
+      inset 0 -1px 0 rgba(148,163,184,0.18),
+      0 22px 34px rgba(15,23,42,0.14);
+  }
+
+  .rentz-editor-action:active {
+    transform: translateY(0);
+  }
+
+  .rentz-editor-action:focus-visible {
+    outline: none;
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.98),
+      inset 0 -1px 0 rgba(148,163,184,0.18),
+      0 0 0 4px var(--accent-glow),
+      0 22px 34px rgba(15,23,42,0.14);
+  }
+
+  .rentz-editor-action-icon {
+    display: inline-flex;
+    height: 3rem;
+    width: 3rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.82);
+    border-radius: 1rem;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(236,242,247,0.9) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.96),
+      0 10px 18px rgba(15,23,42,0.08);
+    color: #214b63;
+    flex: 0 0 auto;
+  }
+
+  .rentz-editor-action-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    gap: 0.16rem;
+  }
+
+  .rentz-editor-action-title {
+    color: #183344;
+    font-family: "Outfit", "Trebuchet MS", sans-serif;
+    font-size: 1rem;
+    font-weight: 950;
+    letter-spacing: 0.04em;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+
+  .rentz-editor-action-meta {
+    color: #5a7080;
+    font-size: 0.78rem;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .rentz-editor-action.is-primary {
+    background:
+      linear-gradient(135deg, rgba(241,250,230,0.9) 0%, rgba(206,239,171,0.92) 52%, rgba(157,214,107,0.9) 100%);
+  }
+
+  .rentz-editor-action.is-positive {
+    background:
+      linear-gradient(135deg, rgba(232,247,240,0.9) 0%, rgba(188,236,214,0.92) 52%, rgba(104,214,166,0.9) 100%);
+  }
+
+  .rentz-editor-action.is-room {
+    background:
+      linear-gradient(135deg, rgba(249,241,228,0.9) 0%, rgba(247,214,160,0.92) 52%, rgba(238,172,98,0.9) 100%);
+  }
+
+  .rentz-editor-action.is-guide {
+    background:
+      linear-gradient(135deg, rgba(237,244,251,0.9) 0%, rgba(199,222,245,0.92) 52%, rgba(141,182,236,0.9) 100%);
+  }
+
   html.rentz-modal-open,
   body.rentz-modal-open {
     height: 100%;
@@ -378,7 +492,7 @@
   }
 
   .rentz-choice-overlay.has-choice-hand {
-    --rentz-choice-hand-height: clamp(7.1rem, 18dvh, 9.25rem);
+    --rentz-choice-hand-height: clamp(7.4rem, 18.8dvh, 9.6rem);
     --rentz-choice-panel-gap: clamp(1.1rem, 2.4dvh, 1.75rem);
     flex-direction: column;
     gap: var(--rentz-choice-panel-gap);
@@ -527,6 +641,15 @@
     height: 100%;
     padding: 0 0.35rem 0.15rem;
     overscroll-behavior: contain;
+  }
+
+  .rentz-choice-hand-stage .rentz-hand-row {
+    align-items: flex-end;
+    transform: translateY(0.18rem);
+  }
+
+  .rentz-choice-hand-stage .rentz-hand-card-wrap.is-hovered {
+    transform: translateY(-4.5%) translateX(var(--hover-shift, 0px));
   }
 
   .rentz-choice-hand-stage .rentz-hand-card-wrap > button {
@@ -885,17 +1008,17 @@
       min-height: 100dvh;
       overflow-y: auto;
       padding-top: max(0.5rem, env(safe-area-inset-top));
-      padding-bottom: calc(var(--rentz-mobile-nav-reserve) + env(safe-area-inset-bottom));
+      padding-bottom: max(0.5rem, env(safe-area-inset-bottom));
     }
 
     .app-shell .app-window {
       height: auto;
-      min-height: calc(100dvh - var(--rentz-mobile-nav-reserve) - max(0.5rem, env(safe-area-inset-top)) - env(safe-area-inset-bottom));
+      min-height: calc(100dvh - max(0.5rem, env(safe-area-inset-top)) - max(0.5rem, env(safe-area-inset-bottom)));
     }
 
     .app-shell main {
       overflow-x: hidden;
-      padding-bottom: calc(var(--rentz-mobile-nav-reserve) + env(safe-area-inset-bottom));
+      padding-bottom: calc(var(--rentz-mobile-nav-reserve) + 0.9rem + env(safe-area-inset-bottom));
     }
 
     .subpage-viewport {
@@ -1092,6 +1215,15 @@
       width: 100%;
     }
 
+    .rentz-choice-hand-stage .rentz-hand-row {
+      align-items: center;
+      transform: none;
+    }
+
+    .rentz-choice-hand-stage .rentz-hand-card-wrap.is-hovered {
+      transform: translateY(-8%) translateX(var(--hover-shift, 0px));
+    }
+
     .rentz-choice-hand-stage .rentz-hand-scroll {
       padding-inline: 0.18rem;
     }
@@ -1224,6 +1356,15 @@
     display: block;
     min-width: 0;
     min-height: 0;
+  }
+
+  .rentz-desktop-main {
+    display: flex;
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    flex-direction: column;
+    gap: 0.5rem;
   }
 
   .rentz-table-stage {
@@ -1442,17 +1583,29 @@
     transform: skewX(-10deg) rotate(-3.5deg);
   }
 
+  .rentz-turn-timer-box,
+  .rentz-trick-board-note {
+    --rentz-timer-accent: #7dcf4e;
+    --rentz-timer-shell-top: rgba(255,255,255,0.88);
+    --rentz-timer-shell-bottom: rgba(215,229,238,0.72);
+    --rentz-timer-note-border: rgba(125,207,78,0.7);
+    --rentz-timer-note-bg-top: #eef8e7;
+    --rentz-timer-note-bg-bottom: #d4edc0;
+    --rentz-timer-note-color: #2d5a19;
+    --rentz-timer-note-shadow: rgba(125,207,78,0.22);
+  }
+
   .rentz-turn-timer-box {
     --timer-progress-deg: 0deg;
-    --rentz-timer-size: clamp(3.25rem, 6vw, 4rem);
+    --rentz-timer-size: clamp(4.0625rem, 7.5vw, 5rem);
     position: absolute;
     right: 1rem;
     bottom: 1rem;
     top: auto;
     z-index: 19;
-    width: var(--rentz-timer-size);
-    display: grid;
-    justify-items: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     padding: 0;
     pointer-events: none;
   }
@@ -1461,13 +1614,18 @@
     position: relative;
     display: flex;
     aspect-ratio: 1;
-    width: 100%;
+    flex: 0 0 var(--rentz-timer-size);
+    width: var(--rentz-timer-size);
     align-items: center;
     justify-content: center;
     border-radius: 999px;
     background:
-      conic-gradient(from -90deg, #7dcf4e var(--timer-progress-deg), rgba(78,101,117,0.18) 0deg),
-      linear-gradient(180deg, rgba(255,255,255,0.88), rgba(215,229,238,0.72));
+      conic-gradient(
+        from 0deg,
+        var(--rentz-timer-accent) 0deg var(--timer-progress-deg),
+        rgba(78,101,117,0.18) var(--timer-progress-deg) 360deg
+      ),
+      linear-gradient(180deg, var(--rentz-timer-shell-top), var(--rentz-timer-shell-bottom));
     box-shadow:
       inset 0 1px 1px rgba(255,255,255,0.9),
       0 7px 16px rgba(0,0,0,0.16);
@@ -1477,7 +1635,7 @@
   .rentz-turn-timer-ring::before {
     content: '';
     position: absolute;
-    inset: 0.34rem;
+    inset: 0.42rem;
     border-radius: inherit;
     background:
       linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(236,244,249,0.94) 100%);
@@ -1504,22 +1662,113 @@
   }
 
   .rentz-turn-timer-value {
-    font-size: clamp(1.05rem, 1.85vw, 1.35rem);
+    font-size: clamp(1.3125rem, 2.3125vw, 1.6875rem);
     font-weight: 950;
   }
 
   .rentz-turn-timer-unit {
     margin-top: -0.05rem;
-    font-size: 0.48rem;
+    font-size: 0.6rem;
     font-weight: 900;
     letter-spacing: 0.14em;
     text-transform: uppercase;
   }
 
-  .rentz-turn-timer-box.is-low .rentz-turn-timer-ring {
-    background:
-      conic-gradient(from -90deg, #f97368 var(--timer-progress-deg), rgba(78,101,117,0.18) 0deg),
-      linear-gradient(180deg, rgba(255,255,255,0.88), rgba(236,226,218,0.72));
+  .rentz-turn-timer-box.is-half,
+  .rentz-trick-board-note.is-half {
+    --rentz-timer-accent: #f6c453;
+    --rentz-timer-shell-top: rgba(255,255,255,0.9);
+    --rentz-timer-shell-bottom: rgba(244,233,199,0.76);
+    --rentz-timer-note-border: rgba(246,196,83,0.72);
+    --rentz-timer-note-bg-top: #fff4cc;
+    --rentz-timer-note-bg-bottom: #fbe197;
+    --rentz-timer-note-color: #7c4a03;
+    --rentz-timer-note-shadow: rgba(246,196,83,0.24);
+  }
+
+  .rentz-turn-timer-box.is-quarter,
+  .rentz-trick-board-note.is-quarter {
+    --rentz-timer-accent: #fb923c;
+    --rentz-timer-shell-top: rgba(255,255,255,0.9);
+    --rentz-timer-shell-bottom: rgba(245,221,196,0.78);
+    --rentz-timer-note-border: rgba(251,146,60,0.72);
+    --rentz-timer-note-bg-top: #ffe7d3;
+    --rentz-timer-note-bg-bottom: #fdc597;
+    --rentz-timer-note-color: #9a3412;
+    --rentz-timer-note-shadow: rgba(251,146,60,0.24);
+  }
+
+  .rentz-turn-timer-box.is-low,
+  .rentz-trick-board-note.is-low {
+    --rentz-timer-accent: #f97368;
+    --rentz-timer-shell-top: rgba(255,255,255,0.88);
+    --rentz-timer-shell-bottom: rgba(236,226,218,0.72);
+    --rentz-timer-note-border: rgba(249,115,104,0.72);
+    --rentz-timer-note-bg-top: #ffe0de;
+    --rentz-timer-note-bg-bottom: #fdb4ae;
+    --rentz-timer-note-color: #b91c1c;
+    --rentz-timer-note-shadow: rgba(249,115,104,0.26);
+  }
+
+  .rentz-trick-board-note {
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 0.55rem);
+    z-index: 11;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.55rem;
+    min-height: 2rem;
+    width: max-content;
+    max-width: min(calc(100vw - 2rem), 18rem);
+    border: 1px solid var(--rentz-timer-note-border);
+    border-radius: 999px;
+    background: linear-gradient(180deg, var(--rentz-timer-note-bg-top) 0%, var(--rentz-timer-note-bg-bottom) 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.56),
+      inset 0 -1px 0 rgba(90,70,30,0.08),
+      0 12px 24px rgba(15,23,42,0.12),
+      0 0 0 0.18rem var(--rentz-timer-note-shadow);
+    color: var(--rentz-timer-note-color);
+    font-family: "Outfit", "Trebuchet MS", sans-serif;
+    font-size: 0.78rem;
+    font-weight: 950;
+    letter-spacing: 0.08em;
+    line-height: 1;
+    padding: 0.45rem 0.82rem;
+    pointer-events: none;
+    text-transform: uppercase;
+    white-space: nowrap;
+    transform: translateX(-50%);
+    animation: rentz-trick-board-note-float 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  .rentz-trick-board-note-icon {
+    flex: 0 0 auto;
+    color: var(--rentz-timer-accent);
+  }
+
+  @keyframes rentz-trick-board-note-float {
+    0% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-18px) scale(0.96);
+    }
+
+    14% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(8px) scale(1);
+    }
+
+    78% {
+      opacity: 1;
+      transform: translateX(-50%) translateY(4px) scale(1);
+    }
+
+    100% {
+      opacity: 0;
+      transform: translateX(-50%) translateY(-14px) scale(0.98);
+    }
   }
 
   .rentz-desktop-seats {
@@ -1817,8 +2066,10 @@
     top: 55%;
     z-index: 10;
     display: flex;
+    flex-direction: column;
     align-items: center;
     justify-content: center;
+    gap: 0.2rem;
     width: min(27rem, 38vw);
     max-width: calc(100% - 1.4rem);
     transform: translate(-50%, -50%);
@@ -1870,7 +2121,7 @@
     min-height: var(--rentz-bottom-panel-min-height);
     align-items: stretch;
     gap: 0.5rem;
-    grid-template-columns: minmax(0, 1.75fr) minmax(10.75rem, 0.82fr) clamp(15.4rem, 18vw, 18.4rem);
+    grid-template-columns: minmax(0, 1.75fr) minmax(10.75rem, 0.82fr);
   }
 
   .rentz-log-panel,
@@ -2432,21 +2683,30 @@
 
   .rentz-ruleset-grid td.rentz-ruleset-choice-td.is-pickable {
     cursor: pointer;
-    background: linear-gradient(180deg, rgba(226,255,177,0.7) 0%, rgba(166,226,105,0.58) 100%);
-    box-shadow: inset 0 0 0 1px rgba(217,249,157,0.68);
+    background: linear-gradient(180deg, rgba(231,255,196,0.9) 0%, rgba(144,223,78,0.84) 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(201,248,144,0.82),
+      inset 0 -10px 18px rgba(78,163,40,0.12);
   }
 
   .rentz-ruleset-grid td.rentz-ruleset-choice-td.is-pickable:hover {
-    background: linear-gradient(180deg, rgba(244,255,219,0.96) 0%, rgba(190,241,122,0.88) 100%);
+    background: linear-gradient(180deg, rgba(245,255,226,0.98) 0%, rgba(163,235,87,0.94) 100%);
     box-shadow:
       inset 0 0 0 2px rgba(255,255,255,0.8),
-      0 0 0 2px rgba(125,207,78,0.28);
+      0 0 0 2px rgba(125,207,78,0.34);
   }
 
   .rentz-ruleset-grid td.rentz-ruleset-choice-td.is-used {
     cursor: not-allowed;
-    background: var(--surface-subtle);
-    opacity: 0.72;
+    background: linear-gradient(180deg, rgba(92,103,117,0.92) 0%, rgba(51,65,85,0.96) 100%);
+    box-shadow:
+      inset 0 0 0 1px rgba(255,255,255,0.12),
+      inset 0 -10px 18px rgba(15,23,42,0.18);
+    opacity: 0.9;
+  }
+
+  .rentz-ruleset-grid td.rentz-ruleset-choice-td.is-used .rentz-ruleset-choice-cell {
+    color: rgba(255,255,255,0.92);
   }
 
   .rentz-ruleset-grid td.rentz-ruleset-choice-td.is-disabled {
@@ -2648,6 +2908,12 @@
       --rentz-desktop-element-scale: calc(1 - (var(--rentz-desktop-tightness) * 0.16));
       --rentz-desktop-board-scale: calc(1 - (var(--rentz-desktop-tightness) * 0.28));
       --rentz-desktop-top-box-scale: calc(1 - (var(--rentz-desktop-tightness) * 0.22));
+      --rentz-desktop-sidebar-gap: calc(0.62rem * var(--rentz-desktop-element-scale));
+      --rentz-bottom-panel-min-height: calc(5.2rem * var(--rentz-desktop-element-scale));
+      --rentz-desktop-log-base-size: max(
+        calc((100% - var(--rentz-desktop-sidebar-gap)) * 0.252),
+        var(--rentz-bottom-panel-min-height)
+      );
       --rentz-desktop-sidebar-width: clamp(
         calc(14.15rem * var(--rentz-desktop-element-scale)),
         calc(17vw * var(--rentz-desktop-element-scale)),
@@ -2655,15 +2921,21 @@
       );
       display: grid;
       height: 100%;
-      grid-template-rows: minmax(0, 2.14fr) minmax(calc(5.45rem * var(--rentz-desktop-element-scale)), 0.72fr);
+      grid-template-columns: minmax(0, 1fr) var(--rentz-desktop-sidebar-width);
+      gap: calc(0.72rem * var(--rentz-desktop-element-scale));
       align-items: stretch;
       zoom: var(--rentz-desktop-game-zoom-lock);
     }
 
-    .rentz-desktop-stage {
+    .rentz-desktop-main {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) var(--rentz-desktop-sidebar-width);
+      grid-template-rows: minmax(0, 2.14fr) minmax(calc(5.45rem * var(--rentz-desktop-element-scale)), 0.72fr);
       gap: calc(0.72rem * var(--rentz-desktop-element-scale));
+      min-height: 0;
+    }
+
+    .rentz-desktop-stage {
+      display: block;
       min-height: 0;
     }
 
@@ -2697,7 +2969,7 @@
       right: 1.05rem;
       bottom: 1.05rem;
       top: auto;
-      width: calc(3.45rem * var(--rentz-desktop-top-box-scale));
+      --rentz-timer-size: calc(4.3125rem * var(--rentz-desktop-top-box-scale));
     }
 
     .rentz-desktop-seats {
@@ -2711,20 +2983,28 @@
     .rentz-desktop-sidebar {
       display: flex;
       flex-direction: column;
-      align-content: start;
-      gap: 0.75rem;
+      gap: var(--rentz-desktop-sidebar-gap);
       min-width: 0;
       min-height: 0;
     }
 
     .rentz-desktop-player-list {
       display: flex;
+      flex: 0 1 auto;
       flex-direction: column;
       gap: calc(0.62rem * var(--rentz-desktop-element-scale));
       min-width: 0;
       min-height: 0;
-      max-height: 100%;
+      max-height: calc(100% - var(--rentz-desktop-log-base-size) - var(--rentz-desktop-sidebar-gap));
       overflow: auto;
+    }
+
+    .rentz-log-panel-desktop {
+      display: flex;
+      flex: 1 0 var(--rentz-desktop-log-base-size);
+      height: auto;
+      max-height: 100%;
+      min-height: var(--rentz-desktop-log-base-size);
     }
 
     .rentz-seat-cluster {
@@ -2839,15 +3119,22 @@
     }
 
     .rentz-bottom-strip {
-      --rentz-bottom-panel-min-height: calc(5.2rem * var(--rentz-desktop-element-scale));
       gap: calc(0.44rem * var(--rentz-desktop-element-scale));
-      grid-template-columns: minmax(0, 1.82fr) minmax(calc(10.2rem * var(--rentz-desktop-element-scale)), 0.76fr) var(--rentz-desktop-sidebar-width);
+      grid-template-columns: minmax(0, 1.82fr) minmax(calc(10.2rem * var(--rentz-desktop-element-scale)), 0.76fr);
     }
   }
 
   @media (min-width: 1024px) and (max-height: 860px) {
-    .rentz-game-frame {
+    .rentz-desktop-main {
       grid-template-rows: minmax(0, 2fr) minmax(calc(4.95rem * var(--rentz-desktop-element-scale)), 0.68fr);
+    }
+
+    .rentz-game-frame {
+      --rentz-bottom-panel-min-height: calc(4.6rem * var(--rentz-desktop-element-scale));
+      --rentz-desktop-log-base-size: max(
+        calc((100% - var(--rentz-desktop-sidebar-gap)) * 0.254),
+        var(--rentz-bottom-panel-min-height)
+      );
     }
 
     .rentz-table-stage {
@@ -2855,7 +3142,6 @@
     }
 
     .rentz-bottom-strip {
-      --rentz-bottom-panel-min-height: calc(4.6rem * var(--rentz-desktop-element-scale));
       gap: calc(0.38rem * var(--rentz-desktop-element-scale));
     }
 
@@ -2875,8 +3161,16 @@
   }
 
   @media (min-width: 1024px) and (max-height: 720px) {
-    .rentz-game-frame {
+    .rentz-desktop-main {
       grid-template-rows: minmax(0, 1.84fr) minmax(calc(4.2rem * var(--rentz-desktop-element-scale)), 0.58fr);
+    }
+
+    .rentz-game-frame {
+      --rentz-bottom-panel-min-height: calc(4rem * var(--rentz-desktop-element-scale));
+      --rentz-desktop-log-base-size: max(
+        calc((100% - var(--rentz-desktop-sidebar-gap)) * 0.24),
+        var(--rentz-bottom-panel-min-height)
+      );
     }
 
     .rentz-table-stage {
@@ -2884,7 +3178,6 @@
     }
 
     .rentz-bottom-strip {
-      --rentz-bottom-panel-min-height: calc(4rem * var(--rentz-desktop-element-scale));
       gap: calc(0.3rem * var(--rentz-desktop-element-scale));
     }
 
@@ -2920,10 +3213,6 @@
 
     .rentz-marking-box {
       max-width: min(16rem, 31%);
-    }
-
-    .rentz-desktop-stage {
-      grid-template-columns: minmax(0, 1fr) clamp(14rem, 20vw, 16.25rem);
     }
 
     .rentz-spectator-box {
@@ -3096,7 +3385,14 @@
       right: 0.9rem;
       bottom: 0.9rem;
       top: auto;
-      width: 3.2rem;
+      --rentz-timer-size: 4rem;
+      gap: 0.42rem;
+    }
+
+    .rentz-trick-board-note {
+      min-height: 1.8rem;
+      font-size: 0.7rem;
+      padding: 0.38rem 0.6rem;
     }
 
     .rentz-bottom-strip {
@@ -3125,7 +3421,9 @@
 
     .rentz-mobile-panels > .rentz-players-panel,
     .rentz-mobile-panels > .rentz-log-panel {
-      height: 16rem;
+      height: auto;
+      min-height: 10.5rem;
+      max-height: 16rem;
     }
 
     .rentz-log-panel-mobile {
@@ -3166,7 +3464,9 @@
 
     .rentz-mobile-panels > .rentz-players-panel,
     .rentz-mobile-panels > .rentz-log-panel {
-      height: 13.5rem;
+      height: auto;
+      min-height: 9.25rem;
+      max-height: 13.5rem;
     }
 
     .rentz-player-row {
@@ -3230,7 +3530,15 @@
       right: 0.7rem;
       bottom: 0.7rem;
       top: auto;
-      width: 2.9rem;
+      --rentz-timer-size: 3.625rem;
+      gap: 0.35rem;
+    }
+
+    .rentz-trick-board-note {
+      min-height: 1.68rem;
+      font-size: 0.64rem;
+      letter-spacing: 0.06em;
+      padding: 0.34rem 0.52rem;
     }
 
     .rentz-spectator-popover {

@@ -15,6 +15,7 @@ import {
   Library,
   Lock,
   LogIn,
+  LogOut,
   MoreHorizontal,
   RefreshCw,
   Settings,
@@ -122,7 +123,7 @@ const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
   }, {})
 );
 const DEFAULT_ROOM_VISIBILITY = 'public';
-const TURN_TIMER_RANGE = { min: 5, max: 60, defaultValue: 15 };
+const TURN_TIMER_RANGE = { min: 15, max: 300, defaultValue: 45 };
 const RULESET_TYPE_OPTIONS = new Set(['per_round', 'end_game']);
 const RENTZ_METADATA_KEYS = new Set(['long_name', 'short_name', 'title', 'name', 'abbreviation', 'abbr', 'type']);
 
@@ -198,30 +199,31 @@ function parseRentzRulesetText(sourceText) {
     index = 1;
   }
 
-  if (hasRentzHeader) {
-    while (index < lines.length) {
-      const trimmed = lines[index].trim();
-      if (!trimmed || trimmed === '#') {
-        index += 1;
-        break;
-      }
-
-      if (/^-{3,}$/.test(trimmed)) {
-        index += 1;
-        break;
-      }
-
-      const metadataEntry = parseRentzMetadataLine(lines[index]);
-      if (!metadataEntry) {
-        break;
-      }
-
-      metadata[metadataEntry.key] = metadataEntry.value;
+  const metadataStartIndex = index;
+  while (index < lines.length) {
+    const trimmed = lines[index].trim();
+    if (!trimmed || trimmed === '#') {
       index += 1;
+      break;
     }
+
+    if (/^-{3,}$/.test(trimmed)) {
+      index += 1;
+      break;
+    }
+
+    const metadataEntry = parseRentzMetadataLine(lines[index]);
+    if (!metadataEntry) {
+      break;
+    }
+
+    metadata[metadataEntry.key] = metadataEntry.value;
+    index += 1;
   }
 
-  if (!hasRentzHeader) {
+  const hasLeadingMetadata = index > metadataStartIndex;
+
+  if (!hasRentzHeader && !hasLeadingMetadata) {
     let titleIndex = 0;
     while (titleIndex < lines.length && !lines[titleIndex].trim()) {
       titleIndex += 1;
@@ -240,7 +242,7 @@ function parseRentzRulesetText(sourceText) {
     }
   }
 
-  const code = hasRentzHeader
+  const code = (hasRentzHeader || hasLeadingMetadata)
     ? lines.slice(index).join('\n').trim()
     : normalizedText.trim();
   const longName = metadata.long_name || metadata.title || metadata.name || 'Imported Ruleset';
@@ -259,7 +261,6 @@ function formatRentzRuleset({ longName, shortName, type, code }) {
   const resolvedShortName = String(shortName || '').trim() || buildRulesetShortNameFallback(resolvedLongName);
 
   return [
-    '# Rentz Arena Ruleset',
     `# long_name: ${resolvedLongName}`,
     `# short_name: ${resolvedShortName}`,
     `# type: ${normalizeRulesetType(type)}`,
@@ -1268,12 +1269,16 @@ function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchC
   const rankingRows = players.map((player) => {
     const previousRank = stats.previousRanks?.[player.userId];
     const nextRank = stats.nextRanks?.[player.userId];
+    const previousPoints = stats.previousPoints?.[player.userId] || 0;
+    const nextPoints = stats.nextPoints?.[player.userId] || 0;
     const scoreDelta = stats.scoreDeltas?.[player.userId] || 0;
 
     return {
       player,
       previousRank,
       nextRank,
+      previousPoints,
+      nextPoints,
       scoreDelta
     };
   }).sort((left, right) => {
@@ -1313,12 +1318,20 @@ function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchC
           </div>
 
           <div className="mt-4 space-y-3">
-            {rankingRows.map(({ player, previousRank, nextRank, scoreDelta }) => (
+            {rankingRows.map(({ player, previousRank, nextRank, previousPoints, nextPoints, scoreDelta }) => (
               <div key={player.userId} className="flex items-center justify-between gap-3 rounded-[1.15rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] px-4 py-3">
                 <div className="min-w-0">
                   <div className="truncate text-base font-black text-[var(--text-primary)]">{getPlayerName(player)}</div>
                   <div className="text-xs font-bold text-[var(--text-secondary)]">
                     Rank {previousRank || '—'} → {nextRank || '—'} ({getRankDelta(previousRank, nextRank)})
+                  </div>
+                  <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] font-black uppercase tracking-[0.12em]">
+                    <span className="rounded-full bg-slate-200/85 px-3 py-1 text-slate-700">
+                      Current {previousPoints}
+                    </span>
+                    <span className="rounded-full bg-sky-200/80 px-3 py-1 text-sky-900">
+                      Final {nextPoints}
+                    </span>
                   </div>
                 </div>
                 <div className={clsx('text-lg font-black', scoreDelta >= 0 ? 'text-emerald-700' : 'text-red-700')}>
@@ -1441,6 +1454,7 @@ function App() {
   const [errorMsg, setErrorMsg] = useState('');
   const [finalStandings, setFinalStandings] = useState([]);
   const [topPrompts, setTopPrompts] = useState([]);
+  const [turnTimerNotice, setTurnTimerNotice] = useState('');
   const [isSpectatorPopoverOpen, setIsSpectatorPopoverOpen] = useState(false);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const [desktopStageTightness, setDesktopStageTightness] = useState(0);
@@ -1460,6 +1474,8 @@ function App() {
   const editorImportInputRef = useRef(null);
   const roomImportInputRef = useRef(null);
   const spectatorPopoverRef = useRef(null);
+  const turnTimerWarningStateRef = useRef({ deadline: null, halfShown: false, quarterShown: false });
+  const turnTimerNoticeTimeoutRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
   const [editorShortName, setEditorShortName] = useState('MHR');
@@ -1586,6 +1602,54 @@ function App() {
     if (typeof restoredGame.stateVersion === 'number') {
       latestGameStateVersionRef.current = restoredGame.stateVersion;
     }
+  }
+
+  function resetActiveRoomState() {
+    const defaultRoomSettings = normalizeRoomSettings();
+
+    if (turnTimerNoticeTimeoutRef.current) {
+      window.clearTimeout(turnTimerNoticeTimeoutRef.current);
+      turnTimerNoticeTimeoutRef.current = null;
+    }
+
+    updateStoredGuestRoom(null);
+    latestGameStateVersionRef.current = 0;
+    startingHandSizeRef.current = 0;
+    setInLobby(false);
+    setGameStarted(false);
+    setIsSpectatingGame(false);
+    setGameFinished(false);
+    setRoomId('');
+    setRoomName('');
+    setRoomVisibility(DEFAULT_ROOM_VISIBILITY);
+    setPlayers([]);
+    setSpectators([]);
+    setLobbyHostId('');
+    setRoomSettings(defaultRoomSettings);
+    setDraftRoomSettings(defaultRoomSettings);
+    setChoiceState(null);
+    setHand([]);
+    setStartingHandSize(0);
+    setMyIndex(-1);
+    setTurnIndex(0);
+    setTrickSuit(null);
+    setCardCounts({});
+    setCollectedHandsByPlayer({});
+    setCurrentTrick([]);
+    setPendingPlayCard(null);
+    setAnimatingWinner(null);
+    setTrickWinnerId(null);
+    setPlayView('table');
+    setActivityFeed([]);
+    setErrorMsg('');
+    setFinalStandings([]);
+    setTopPrompts([]);
+    setTurnTimerNotice('');
+    setIsSpectatorPopoverOpen(false);
+    setLatestRoundStats(null);
+    setIsStatsOpen(false);
+    setMatchCompletePending(false);
+    setIsRoomSettingsOpen(false);
   }
 
   useEffect(() => {
@@ -1840,34 +1904,12 @@ function App() {
     });
 
     socket.on('lobby_removed', ({ reason }) => {
-      updateStoredGuestRoom(null);
-      setInLobby(false);
-      setGameStarted(false);
-      setGameFinished(false);
-      setRoomId('');
-      setPlayers([]);
-      setSpectators([]);
-      setChoiceState(null);
-      setHand([]);
-      setLatestRoundStats(null);
-      setIsStatsOpen(false);
-      setMatchCompletePending(false);
+      resetActiveRoomState();
       showTopPrompt(reason || 'You were removed from the room.', 'error');
     });
 
     socket.on('lobby_deleted', ({ reason, deletedBy }) => {
-      updateStoredGuestRoom(null);
-      setInLobby(false);
-      setGameStarted(false);
-      setGameFinished(false);
-      setRoomId('');
-      setPlayers([]);
-      setSpectators([]);
-      setChoiceState(null);
-      setHand([]);
-      setLatestRoundStats(null);
-      setIsStatsOpen(false);
-      setMatchCompletePending(false);
+      resetActiveRoomState();
       showTopPrompt(
         deletedBy === activeProfileRef.current?.userId ? 'Room deleted.' : (reason || 'The room was deleted.'),
         deletedBy === activeProfileRef.current?.userId ? 'info' : 'error'
@@ -2489,19 +2531,19 @@ function App() {
         showErrorMessage(response.error);
         return;
       }
-      updateStoredGuestRoom(null);
-      setInLobby(false);
-      setRoomId('');
-      setPlayers([]);
-      setSpectators([]);
-      setIsRoomSettingsOpen(false);
-      setGameStarted(false);
-      setGameFinished(false);
-      setChoiceState(null);
-      setHand([]);
-      setLatestRoundStats(null);
-      setIsStatsOpen(false);
-      setMatchCompletePending(false);
+      resetActiveRoomState();
+    });
+  };
+
+  const handleLeaveRoom = () => {
+    socket.emit('leave_lobby', { roomId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+        return;
+      }
+
+      resetActiveRoomState();
+      showTopPrompt(response?.message || 'You left the room.', response?.roomDeleted ? 'info' : 'success');
     });
   };
 
@@ -2620,6 +2662,18 @@ function App() {
   const turnTimerProgress = activeRoundTimerDeadline
     ? clampNumber(turnTimerRemainingMs / Math.max(turnTimerTotalSeconds * 1000, 1), 0, 1)
     : 0;
+  const turnTimerElapsedProgress = activeRoundTimerDeadline
+    ? clampNumber(1 - turnTimerProgress, 0, 1)
+    : 0;
+  const turnTimerWarningStage = !activeRoundTimerDeadline
+    ? 'normal'
+    : turnTimerRemainingSeconds <= 5
+      ? 'low'
+      : turnTimerProgress <= 0.25
+        ? 'quarter'
+        : turnTimerProgress <= 0.5
+          ? 'half'
+          : 'normal';
   const fontScalePercent = Math.round(fontScale * 100);
   const pageZoomPercent = Math.round(pageZoom * 100);
   const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending || isChoosingNv || isChoosingRuleset);
@@ -2848,6 +2902,14 @@ function App() {
   };
 
   useEffect(() => {
+    return () => {
+      if (turnTimerNoticeTimeoutRef.current) {
+        window.clearTimeout(turnTimerNoticeTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
     if (!activeRoundTimerDeadline) {
       return undefined;
     }
@@ -2862,6 +2924,57 @@ function App() {
       window.clearInterval(intervalId);
     };
   }, [activeRoundTimerDeadline]);
+
+  useEffect(() => {
+    const warningState = turnTimerWarningStateRef.current;
+    const clearTurnTimerNotice = () => {
+      if (turnTimerNoticeTimeoutRef.current) {
+        window.clearTimeout(turnTimerNoticeTimeoutRef.current);
+        turnTimerNoticeTimeoutRef.current = null;
+      }
+      setTurnTimerNotice('');
+    };
+
+    const showTurnTimerNotice = (secondsLeft) => {
+      if (turnTimerNoticeTimeoutRef.current) {
+        window.clearTimeout(turnTimerNoticeTimeoutRef.current);
+      }
+      setTurnTimerNotice(`${secondsLeft}s left`);
+      turnTimerNoticeTimeoutRef.current = window.setTimeout(() => {
+        setTurnTimerNotice('');
+        turnTimerNoticeTimeoutRef.current = null;
+      }, 1600);
+    };
+
+    if (!isPlayingRound || !activeRoundTimerDeadline) {
+      warningState.deadline = null;
+      warningState.halfShown = false;
+      warningState.quarterShown = false;
+      clearTurnTimerNotice();
+      return;
+    }
+
+    const totalTimerMs = Math.max(turnTimerTotalSeconds * 1000, 1);
+
+    if (warningState.deadline !== activeRoundTimerDeadline) {
+      warningState.deadline = activeRoundTimerDeadline;
+      warningState.halfShown = turnTimerRemainingMs <= totalTimerMs / 2;
+      warningState.quarterShown = turnTimerRemainingMs <= totalTimerMs / 4;
+      clearTurnTimerNotice();
+      return;
+    }
+
+    if (!warningState.quarterShown && turnTimerRemainingMs > 0 && turnTimerRemainingMs <= totalTimerMs / 4) {
+      warningState.quarterShown = true;
+      showTurnTimerNotice(turnTimerRemainingSeconds);
+      return;
+    }
+
+    if (!warningState.halfShown && turnTimerRemainingMs > 0 && turnTimerRemainingMs <= totalTimerMs / 2) {
+      warningState.halfShown = true;
+      showTurnTimerNotice(turnTimerRemainingSeconds);
+    }
+  }, [activeRoundTimerDeadline, isPlayingRound, turnTimerRemainingMs, turnTimerRemainingSeconds, turnTimerTotalSeconds]);
 
   useEffect(() => {
     const stageElement = tableStageRef.current;
@@ -3249,6 +3362,15 @@ function App() {
               </button>
             )}
 
+            <button
+              type="button"
+              onClick={handleLeaveRoom}
+              className="inline-flex items-center justify-center gap-2 rounded-[1.6rem] border border-red-200/75 bg-[linear-gradient(180deg,rgba(255,243,243,0.97)_0%,rgba(254,205,211,0.9)_100%)] px-6 py-4 text-base font-black uppercase tracking-[0.16em] text-red-950 transition hover:-translate-y-0.5 hover:brightness-[1.02] sm:px-8 sm:text-lg sm:tracking-[0.18em]"
+            >
+              <LogOut className="h-4 w-4" />
+              Leave Room
+            </button>
+
             {gameFinished && (
               <button onClick={() => setPlayView('stats')} className="rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-6 py-4 text-base font-black uppercase tracking-[0.16em] transition hover:bg-[var(--surface-hover)] sm:px-8 sm:text-lg sm:tracking-[0.18em]">
                 View Last Game Stats
@@ -3543,9 +3665,10 @@ function App() {
           className="rentz-game-frame flex-1 min-h-0"
           style={{ '--rentz-stage-tightness': `${desktopStageTightness}` }}
         >
-          <div className="rentz-desktop-stage">
-            <div className="rentz-table-stage table-felt">
-            <div ref={tableStageRef} className="rentz-table-main">
+          <div className="rentz-desktop-main">
+            <div className="rentz-desktop-stage">
+              <div className="rentz-table-stage table-felt">
+              <div ref={tableStageRef} className="rentz-table-main">
               <div className="rentz-marking-box">
                 <span className="rentz-marking-label">Marking suit:</span>
                 <span
@@ -3610,8 +3733,13 @@ function App() {
 
               {isPlayingRound && activeRoundTimerDeadline && (
                 <div
-                  className={clsx('rentz-turn-timer-box', turnTimerRemainingSeconds <= 5 && 'is-low')}
-                  style={{ '--timer-progress-deg': `${turnTimerProgress * 360}deg` }}
+                  className={clsx(
+                    'rentz-turn-timer-box',
+                    turnTimerWarningStage === 'half' && 'is-half',
+                    turnTimerWarningStage === 'quarter' && 'is-quarter',
+                    turnTimerWarningStage === 'low' && 'is-low'
+                  )}
+                  style={{ '--timer-progress-deg': `${turnTimerElapsedProgress * 360}deg` }}
                   aria-label={`${turnTimerRemainingSeconds} seconds left for ${nextTurnPlayer ? getPlayerName(nextTurnPlayer) : 'player'} to play`}
                 >
                   <div className="rentz-turn-timer-ring" aria-hidden="true">
@@ -3677,77 +3805,94 @@ function App() {
                   trickPending={trickPending || Boolean(animatingWinner)}
                   trickWinnerId={trickWinnerId}
                 />
+                {turnTimerNotice && (
+                  <div
+                    key={turnTimerNotice}
+                    className={clsx(
+                      'rentz-trick-board-note',
+                      turnTimerWarningStage === 'half' && 'is-half',
+                      turnTimerWarningStage === 'quarter' && 'is-quarter',
+                      turnTimerWarningStage === 'low' && 'is-low'
+                    )}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <Clock className="rentz-trick-board-note-icon h-4 w-4" aria-hidden="true" />
+                    <span>{turnTimerNotice}</span>
+                  </div>
+                )}
               </div>
             </div>
             </div>
+            </div>
 
-            <div className="rentz-desktop-sidebar">
-              <div className="rentz-desktop-player-list">
-                {playersForMobilePanel.map((player, index) => (
-                  <DesktopPlayerCard
-                    key={player.userId || player.socketId || index}
-                    player={player}
-                    isCurrent={nextTurnPlayer?.userId === player.userId}
-                    isLocal={player.userId === myPlayerId}
-                    cardCount={player.userId === myPlayerId ? hand.length : (cardCounts[player.userId] || 0)}
-                    tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
-                    points={getPlayerPoints(player)}
-                  />
-                ))}
+            <div className="rentz-bottom-strip">
+              {renderHandSpread()}
+
+              <div className="rentz-bottom-action-column flex w-full h-full flex-col justify-center items-center gap-2">
+                <div className="rentz-bottom-action-row">
+                  <button
+                    type="button"
+                    onClick={() => setPlayView('collected')}
+                    className="rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5"
+                  >
+                    <span className="inline-flex items-center justify-center gap-1.5 text-[0.85rem] sm:text-[0.95rem]">
+                      <Swords className="h-4 w-4" />
+                      See Hands
+                    </span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!latestRoundStats}
+                    onClick={() => latestRoundStats && setIsStatsOpen(true)}
+                    className={clsx(
+                      'rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5',
+                      !latestRoundStats && 'is-disabled'
+                    )}
+                    title={latestRoundStats ? 'Open round stats' : 'Stats appear after a round ends'}
+                  >
+                    <span className="inline-flex items-center justify-center gap-1.5 text-[0.85rem] sm:text-[0.95rem]">
+                      <BarChart3 className="h-4 w-4" />
+                      Stats
+                    </span>
+                  </button>
+                </div>
+
+                <div
+                  className="flex w-full shrink-0 items-center justify-between rounded-[1.3rem] border border-[rgba(255,255,255,0.74)] px-3 py-2 sm:px-4 sm:py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(148,163,184,0.16),0_8px_16px_rgba(0,0,0,0.1)]"
+                  style={{ background: 'linear-gradient(180deg, rgba(240,245,249,0.96) 0%, rgba(208,219,230,0.92) 100%)' }}
+                >
+                  <div className="flex flex-col gap-0 pr-2 sm:pr-3">
+                    <span className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-[#546775]">Room</span>
+                    <span className="text-[0.9rem] sm:text-[1rem] font-black uppercase tracking-[0.12em] text-[#1f4d68] drop-shadow-sm leading-none">{roomId}</span>
+                  </div>
+                  <div className="h-6 w-px bg-[#94a3b8]/40 mx-1"></div>
+                  <div className="flex flex-col items-end gap-0 pl-2 sm:pl-3 min-w-0">
+                    <span className="text-[0.65rem] sm:text-[0.7rem] font-bold text-[#5c7080] truncate max-w-[80px] sm:max-w-[100px]">
+                      {localTablePlayer ? `${getPlayerName(localTablePlayer)}` : 'You'}
+                    </span>
+                    <span className="text-[0.65rem] sm:text-[0.7rem] font-black text-[#20303b]">
+                      {isSpectatingGame ? 'Spectating' : `${hand.length} cards`}
+                    </span>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="rentz-bottom-strip">
-            {renderHandSpread()}
-
-            <div className="rentz-bottom-action-column flex w-full h-full flex-col justify-center items-center gap-2">
-              <div className="rentz-bottom-action-row">
-                <button
-                  type="button"
-                  onClick={() => setPlayView('collected')}
-                  className="rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5"
-                >
-                  <span className="inline-flex items-center justify-center gap-1.5 text-[0.85rem] sm:text-[0.95rem]">
-                    <Swords className="h-4 w-4" />
-                    See Hands
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  disabled={!latestRoundStats}
-                  onClick={() => latestRoundStats && setIsStatsOpen(true)}
-                  className={clsx(
-                    'rentz-verify-button w-full !min-h-0 shrink-0 py-2 sm:py-3 transition-transform hover:-translate-y-0.5',
-                    !latestRoundStats && 'is-disabled'
-                  )}
-                  title={latestRoundStats ? 'Open round stats' : 'Stats appear after a round ends'}
-                >
-                  <span className="inline-flex items-center justify-center gap-1.5 text-[0.85rem] sm:text-[0.95rem]">
-                    <BarChart3 className="h-4 w-4" />
-                    Stats
-                  </span>
-                </button>
-              </div>
-
-              <div
-                className="flex w-full shrink-0 items-center justify-between rounded-[1.3rem] border border-[rgba(255,255,255,0.74)] px-3 py-2 sm:px-4 sm:py-2.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.9),inset_0_-1px_0_rgba(148,163,184,0.16),0_8px_16px_rgba(0,0,0,0.1)]"
-                style={{ background: 'linear-gradient(180deg, rgba(240,245,249,0.96) 0%, rgba(208,219,230,0.92) 100%)' }}
-              >
-                <div className="flex flex-col gap-0 pr-2 sm:pr-3">
-                  <span className="text-[0.6rem] font-black uppercase tracking-[0.14em] text-[#546775]">Room</span>
-                  <span className="text-[0.9rem] sm:text-[1rem] font-black uppercase tracking-[0.12em] text-[#1f4d68] drop-shadow-sm leading-none">{roomId}</span>
-                </div>
-                <div className="h-6 w-px bg-[#94a3b8]/40 mx-1"></div>
-                <div className="flex flex-col items-end gap-0 pl-2 sm:pl-3 min-w-0">
-                  <span className="text-[0.65rem] sm:text-[0.7rem] font-bold text-[#5c7080] truncate max-w-[80px] sm:max-w-[100px]">
-                    {localTablePlayer ? `${getPlayerName(localTablePlayer)}` : 'You'}
-                  </span>
-                  <span className="text-[0.65rem] sm:text-[0.7rem] font-black text-[#20303b]">
-                    {isSpectatingGame ? 'Spectating' : `${hand.length} cards`}
-                  </span>
-                </div>
-              </div>
+          <div className="rentz-desktop-sidebar">
+            <div className="rentz-desktop-player-list">
+              {playersForMobilePanel.map((player, index) => (
+                <DesktopPlayerCard
+                  key={player.userId || player.socketId || index}
+                  player={player}
+                  isCurrent={nextTurnPlayer?.userId === player.userId}
+                  isLocal={player.userId === myPlayerId}
+                  cardCount={player.userId === myPlayerId ? hand.length : (cardCounts[player.userId] || 0)}
+                  tricksWon={(collectedHandsByPlayer[player.userId] || []).length}
+                  points={getPlayerPoints(player)}
+                />
+              ))}
             </div>
 
             <section className="rentz-log-panel rentz-log-panel-desktop">
@@ -3764,7 +3909,6 @@ function App() {
                 )}
               </div>
             </section>
-
           </div>
 
           <div className="rentz-mobile-panels">
@@ -4219,28 +4363,62 @@ function App() {
           className="hidden"
         />
 
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          <button onClick={handleCompileRules} className="frutiger-button py-4 text-lg">
-            Compile Ruleset
+        <div className="rentz-editor-actions mt-4">
+          <button onClick={handleCompileRules} className="rentz-editor-action is-primary">
+            <span className="rentz-editor-action-icon">
+              <FileCode2 className="h-5 w-5" />
+            </span>
+            <span className="rentz-editor-action-copy">
+              <span className="rentz-editor-action-title">Compile Ruleset</span>
+              <span className="rentz-editor-action-meta">Validate syntax and refresh the preview.</span>
+            </span>
           </button>
-          <button onClick={handleSaveDraft} className="ready-button py-4 text-lg">
-            Save Draft
+          <button onClick={handleSaveDraft} className="rentz-editor-action is-positive">
+            <span className="rentz-editor-action-icon">
+              <Check className="h-5 w-5" />
+            </span>
+            <span className="rentz-editor-action-copy">
+              <span className="rentz-editor-action-title">Save Draft</span>
+              <span className="rentz-editor-action-meta">Keep this ruleset in your local draft list.</span>
+            </span>
           </button>
-          <button onClick={handleDownloadRentzRuleset} className="inline-flex items-center justify-center gap-2 rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
-            <Download className="h-5 w-5" />
-            Download .rentz
+          <button onClick={handleDownloadRentzRuleset} className="rentz-editor-action">
+            <span className="rentz-editor-action-icon">
+              <Download className="h-5 w-5" />
+            </span>
+            <span className="rentz-editor-action-copy">
+              <span className="rentz-editor-action-title">Download .rentz</span>
+              <span className="rentz-editor-action-meta">Export the current ruleset as a shareable file.</span>
+            </span>
           </button>
-          <button onClick={() => editorImportInputRef.current?.click()} className="inline-flex items-center justify-center gap-2 rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
-            <Upload className="h-5 w-5" />
-            Import .rentz
+          <button onClick={() => editorImportInputRef.current?.click()} className="rentz-editor-action">
+            <span className="rentz-editor-action-icon">
+              <Upload className="h-5 w-5" />
+            </span>
+            <span className="rentz-editor-action-copy">
+              <span className="rentz-editor-action-title">Import .rentz</span>
+              <span className="rentz-editor-action-meta">Load a saved ruleset into the editor.</span>
+            </span>
           </button>
           {canAddGuestRoomRulesets && (
-            <button onClick={handleApplyEditorRulesetToRoom} className="ready-button py-4 text-lg">
-              Apply to Room
+            <button onClick={handleApplyEditorRulesetToRoom} className="rentz-editor-action is-room">
+              <span className="rentz-editor-action-icon">
+                <Sparkles className="h-5 w-5" />
+              </span>
+              <span className="rentz-editor-action-copy">
+                <span className="rentz-editor-action-title">Apply to Room</span>
+                <span className="rentz-editor-action-meta">Push this ruleset straight into the current room.</span>
+              </span>
             </button>
           )}
-          <button onClick={() => setActiveTab('guide')} className="rounded-[1.6rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] py-4 text-lg font-black uppercase tracking-[0.18em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]">
-            View Guide
+          <button onClick={() => setActiveTab('guide')} className="rentz-editor-action is-guide">
+            <span className="rentz-editor-action-icon">
+              <Info className="h-5 w-5" />
+            </span>
+            <span className="rentz-editor-action-copy">
+              <span className="rentz-editor-action-title">View Guide</span>
+              <span className="rentz-editor-action-meta">Open the syntax guide and rule-writing help.</span>
+            </span>
           </button>
         </div>
 
@@ -4600,6 +4778,7 @@ endif`}
                     className={clsx(
                       'copy-toast glass-panel inline-flex w-max max-w-[calc(100vw-2rem)] items-center gap-2.5 rounded-[1.35rem] px-3 py-2.5 shadow-[0_18px_36px_rgba(0,0,0,0.16)] backdrop-blur-2xl sm:gap-3 sm:rounded-[1.6rem] sm:px-4 sm:py-3 sm:max-w-[30rem]',
                       topPrompt.tone === 'success' && 'border-lime-100/90 bg-[linear-gradient(180deg,rgba(248,255,245,0.92)_0%,rgba(214,247,177,0.78)_100%)]',
+                      topPrompt.tone === 'warning' && 'border-amber-100/90 bg-[linear-gradient(180deg,rgba(255,251,235,0.95)_0%,rgba(253,230,138,0.82)_100%)]',
                       topPrompt.tone === 'error' && 'border-rose-100/90 bg-[linear-gradient(180deg,rgba(255,246,248,0.94)_0%,rgba(255,205,218,0.82)_100%)]',
                       topPrompt.tone === 'info' && 'border-sky-100/90 bg-[linear-gradient(180deg,rgba(245,252,255,0.94)_0%,rgba(198,234,255,0.8)_100%)]'
                     )}
@@ -4608,12 +4787,17 @@ endif`}
                       className={clsx(
                         'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border shadow-[inset_0_1px_2px_rgba(255,255,255,0.92),0_6px_12px_rgba(0,0,0,0.08)] sm:h-8 sm:w-8',
                         topPrompt.tone === 'success' && 'border-lime-100/95 bg-white/80 text-emerald-700',
+                        topPrompt.tone === 'warning' && 'border-amber-100/95 bg-white/80 text-amber-700',
                         topPrompt.tone === 'error' && 'border-rose-100/95 bg-white/80 text-rose-700',
                         topPrompt.tone === 'info' && 'border-sky-100/95 bg-white/80 text-sky-700'
                       )}
                     >
                       {topPrompt.tone === 'error' ? (
                         <X className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      ) : topPrompt.tone === 'warning' ? (
+                        <Clock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      ) : topPrompt.tone === 'info' ? (
+                        <Info className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       ) : (
                         <Check className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       )}
@@ -4918,14 +5102,24 @@ endif`}
                   </div>
                 ))}
               </div>
-              <button
-                type="button"
-                onClick={handleDeleteRoom}
-                className="mt-4 inline-flex items-center gap-2 rounded-[1.2rem] border border-red-200/70 bg-red-200/70 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-red-950"
-              >
-                <Trash2 className="h-4 w-4" />
-                Delete room
-              </button>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={handleLeaveRoom}
+                  className="inline-flex items-center gap-2 rounded-[1.2rem] border border-red-200/70 bg-[linear-gradient(180deg,rgba(255,243,243,0.97)_0%,rgba(254,205,211,0.9)_100%)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-red-950"
+                >
+                  <LogOut className="h-4 w-4" />
+                  Leave room
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteRoom}
+                  className="inline-flex items-center gap-2 rounded-[1.2rem] border border-red-200/70 bg-red-200/70 px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-red-950"
+                >
+                  <Trash2 className="h-4 w-4" />
+                  Delete room
+                </button>
+              </div>
             </section>
           </div>
         </ModalShell>

@@ -6,6 +6,8 @@ const {
   findNextChooser,
   getEligibleRuleIdsForPlayer,
   getStartGameValidationError,
+  removeWaitingLobbyMember,
+  sanitizeTurnTimerSeconds,
   sanitizeRulesetPermissions,
   setLobbyMemberRole
 } = require('../socketManager');
@@ -73,6 +75,52 @@ test('prevents moving a spectator into the player list when all six seats are ta
   assert.strictEqual(lobby.spectators.length, 1);
 });
 
+test('reassigns host to the next joined player when the current host leaves', () => {
+  const lobby = {
+    hostId: 'host-1',
+    players: [
+      { socketId: 'socket-host', userId: 'host-1', isReady: true, role: 'player' },
+      { socketId: 'socket-second', userId: 'player-2', isReady: false, role: 'player' },
+      { socketId: 'socket-third', userId: 'player-3', isReady: false, role: 'player' }
+    ],
+    spectators: [{ socketId: 'socket-viewer', userId: 'viewer-1', isReady: false, role: 'spectator' }],
+    rulesetPermissions: {
+      'host-1': { whist: true },
+      'player-2': { whist: true },
+      'player-3': { whist: true }
+    }
+  };
+
+  const result = removeWaitingLobbyMember(lobby, 'host-1');
+
+  assert.strictEqual(result.member.userId, 'host-1');
+  assert.strictEqual(result.shouldDeleteRoom, false);
+  assert.strictEqual(result.hostChanged, true);
+  assert.strictEqual(result.nextHostId, 'player-2');
+  assert.strictEqual(lobby.hostId, 'player-2');
+  assert.deepStrictEqual(lobby.players.map((player) => player.userId), ['player-2', 'player-3']);
+});
+
+test('marks the room for deletion when the last active player leaves even if spectators remain', () => {
+  const lobby = {
+    hostId: 'host-1',
+    players: [{ socketId: 'socket-host', userId: 'host-1', isReady: true, role: 'player' }],
+    spectators: [{ socketId: 'socket-viewer', userId: 'viewer-1', isReady: false, role: 'spectator' }],
+    rulesetPermissions: {
+      'host-1': { whist: true }
+    }
+  };
+
+  const result = removeWaitingLobbyMember(lobby, 'host-1');
+
+  assert.strictEqual(result.member.userId, 'host-1');
+  assert.strictEqual(result.shouldDeleteRoom, true);
+  assert.strictEqual(result.remainingPlayerCount, 0);
+  assert.strictEqual(lobby.hostId, 'viewer-1');
+  assert.strictEqual(lobby.players.length, 0);
+  assert.strictEqual(lobby.spectators.length, 1);
+});
+
 test('bumps the gameplay state version monotonically for room sync events', () => {
   const game = { stateVersion: 0 };
 
@@ -94,6 +142,13 @@ test('sanitizes per-player ruleset permissions against enabled rules', () => {
   assert.strictEqual(permissions['p-1'].levate, false);
   assert.strictEqual(permissions['p-2'].whist, true);
   assert.strictEqual(permissions['p-2'].levate, false);
+});
+
+test('sanitizes turn timer seconds to the 15-300 range with a 45 second default', () => {
+  assert.strictEqual(sanitizeTurnTimerSeconds(undefined), 45);
+  assert.strictEqual(sanitizeTurnTimerSeconds(5), 15);
+  assert.strictEqual(sanitizeTurnTimerSeconds(45), 45);
+  assert.strictEqual(sanitizeTurnTimerSeconds(420), 300);
 });
 
 test('fixed chooser order loops and skips players with no choices', () => {
