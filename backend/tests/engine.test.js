@@ -118,7 +118,7 @@ test('reset_to changes only TOTAL_POINTS', () => {
 test('evaluates isolated hands from the same ruleset without state bleed', () => {
   const code = `
     add(5, HEART_NR >= 1)
-    reset_to(100, SPADE_A)
+    set_to(100, SPADE_A)
   `;
 
   const result = evaluateIsolatedHands({
@@ -142,8 +142,8 @@ test('evaluates isolated hands from the same ruleset without state bleed', () =>
 
   assert.strictEqual(result.results.length, 2);
   assert.deepStrictEqual(result.results[0], {
-    POINTS: 15,
-    TOTAL_POINTS: 100,
+    POINTS: 100,
+    TOTAL_POINTS: 0,
     gameEnded: false
   });
   assert.deepStrictEqual(result.results[1], {
@@ -151,4 +151,43 @@ test('evaluates isolated hands from the same ruleset without state bleed', () =>
     TOTAL_POINTS: 0,
     gameEnded: false
   });
+});
+
+test('end_game add updates TOTAL_POINTS for final scoring', () => {
+  const result = evaluateRuleWithSnapshot(
+    compileRuleset('add(25)', 'end_game'),
+    buildRuleSnapshot({
+      playerCount: 4,
+      initialPoints: 50,
+      handCards: ['K-H'],
+      nonDiscardedCards: []
+    })
+  );
+
+  assert.strictEqual(result.POINTS, 75);
+  assert.strictEqual(result.TOTAL_POINTS, 75);
+});
+
+test('rejects ruleset commands that do not match the ruleset type', () => {
+  assert.throws(
+    () => compileRuleset('reset_to(100)', 'per_round'),
+    /reset_to is only allowed in end_game rulesets/
+  );
+
+  assert.throws(
+    () => compileRuleset('game_end()', 'end_game'),
+    /game_end is only allowed in per_round rulesets/
+  );
+});
+
+test('rejects invalid no-op and malformed numeric statements', () => {
+  assert.throws(
+    () => compileRuleset('HEART_KING', 'per_round'),
+    /Standalone expressions are not allowed/
+  );
+
+  assert.throws(
+    () => compileRuleset('add(1..2)', 'per_round'),
+    /Invalid numeric literal/
+  );
 });

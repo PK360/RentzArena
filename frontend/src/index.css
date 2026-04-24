@@ -1394,6 +1394,7 @@
     display: none;
   }
 
+  .rentz-current-game-box,
   .rentz-marking-box,
   .rentz-spectator-box {
     position: absolute;
@@ -1422,8 +1423,17 @@
     text-transform: uppercase;
   }
 
+  .rentz-current-game-box {
+    left: 1rem;
+    justify-content: flex-start;
+    color: #ffd27d;
+    flex-wrap: nowrap;
+    max-width: min(40%, calc(100% - 2rem));
+  }
+
   .rentz-marking-box {
     left: 1rem;
+    top: 4.1rem;
     justify-content: flex-start;
     color: #ff6457;
   }
@@ -1445,6 +1455,23 @@
     flex: 0 1 auto;
     max-width: 100%;
     white-space: nowrap;
+  }
+
+  .rentz-current-game-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .rentz-current-game-text {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rentz-current-game-text-mobile {
+    display: none;
   }
 
   .rentz-marking-value.is-red {
@@ -1583,8 +1610,7 @@
     transform: skewX(-10deg) rotate(-3.5deg);
   }
 
-  .rentz-turn-timer-box,
-  .rentz-trick-board-note {
+  .rentz-turn-timer-box {
     --rentz-timer-accent: #7dcf4e;
     --rentz-timer-shell-top: rgba(255,255,255,0.88);
     --rentz-timer-shell-bottom: rgba(215,229,238,0.72);
@@ -1605,7 +1631,8 @@
     z-index: 19;
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 0.55rem;
+    justify-content: flex-end;
     padding: 0;
     pointer-events: none;
   }
@@ -1674,8 +1701,7 @@
     text-transform: uppercase;
   }
 
-  .rentz-turn-timer-box.is-half,
-  .rentz-trick-board-note.is-half {
+  .rentz-turn-timer-box.is-half {
     --rentz-timer-accent: #f6c453;
     --rentz-timer-shell-top: rgba(255,255,255,0.9);
     --rentz-timer-shell-bottom: rgba(244,233,199,0.76);
@@ -1686,8 +1712,7 @@
     --rentz-timer-note-shadow: rgba(246,196,83,0.24);
   }
 
-  .rentz-turn-timer-box.is-quarter,
-  .rentz-trick-board-note.is-quarter {
+  .rentz-turn-timer-box.is-quarter {
     --rentz-timer-accent: #fb923c;
     --rentz-timer-shell-top: rgba(255,255,255,0.9);
     --rentz-timer-shell-bottom: rgba(245,221,196,0.78);
@@ -1698,8 +1723,7 @@
     --rentz-timer-note-shadow: rgba(251,146,60,0.24);
   }
 
-  .rentz-turn-timer-box.is-low,
-  .rentz-trick-board-note.is-low {
+  .rentz-turn-timer-box.is-low {
     --rentz-timer-accent: #f97368;
     --rentz-timer-shell-top: rgba(255,255,255,0.88);
     --rentz-timer-shell-bottom: rgba(236,226,218,0.72);
@@ -1710,18 +1734,16 @@
     --rentz-timer-note-shadow: rgba(249,115,104,0.26);
   }
 
-  .rentz-trick-board-note {
-    position: absolute;
-    left: 50%;
-    top: calc(100% + 0.55rem);
-    z-index: 11;
+  .rentz-turn-timer-note {
+    position: relative;
     display: inline-flex;
+    flex: 0 1 auto;
     align-items: center;
     justify-content: center;
     gap: 0.55rem;
     min-height: 2rem;
     width: max-content;
-    max-width: min(calc(100vw - 2rem), 18rem);
+    max-width: min(calc(100vw - 8rem), 18rem);
     border: 1px solid var(--rentz-timer-note-border);
     border-radius: 999px;
     background: linear-gradient(180deg, var(--rentz-timer-note-bg-top) 0%, var(--rentz-timer-note-bg-bottom) 100%);
@@ -1740,34 +1762,29 @@
     pointer-events: none;
     text-transform: uppercase;
     white-space: nowrap;
-    transform: translateX(-50%);
-    animation: rentz-trick-board-note-float 1.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: rentz-turn-timer-note-fade 2.4s linear both;
   }
 
-  .rentz-trick-board-note-icon {
+  .rentz-turn-timer-note-icon {
     flex: 0 0 auto;
     color: var(--rentz-timer-accent);
   }
 
-  @keyframes rentz-trick-board-note-float {
+  @keyframes rentz-turn-timer-note-fade {
     0% {
       opacity: 0;
-      transform: translateX(-50%) translateY(-18px) scale(0.96);
     }
 
-    14% {
+    8% {
       opacity: 1;
-      transform: translateX(-50%) translateY(8px) scale(1);
     }
 
-    78% {
+    91% {
       opacity: 1;
-      transform: translateX(-50%) translateY(4px) scale(1);
     }
 
     100% {
       opacity: 0;
-      transform: translateX(-50%) translateY(-14px) scale(0.98);
     }
   }
 
@@ -2946,13 +2963,22 @@
       padding: calc(0.86rem * var(--rentz-desktop-element-scale)) calc(1.08rem * var(--rentz-desktop-element-scale)) calc(0.96rem * var(--rentz-desktop-element-scale));
     }
 
+    .rentz-current-game-box,
     .rentz-marking-box {
       left: 1.05rem;
-      top: 0.92rem;
-      max-width: min(calc(18rem * var(--rentz-desktop-top-box-scale)), 48%);
       gap: calc(0.35rem * var(--rentz-desktop-top-box-scale));
       padding: calc(0.55rem * var(--rentz-desktop-top-box-scale)) calc(0.8rem * var(--rentz-desktop-top-box-scale));
       font-size: calc(0.86rem * var(--rentz-desktop-top-box-scale));
+    }
+
+    .rentz-current-game-box {
+      top: 0.92rem;
+      max-width: min(40%, calc(100% - 2.1rem));
+    }
+
+    .rentz-marking-box {
+      top: calc(0.92rem + (3.2rem * var(--rentz-desktop-top-box-scale)));
+      max-width: min(calc(18rem * var(--rentz-desktop-top-box-scale)), 48%);
     }
 
     .rentz-spectator-box {
@@ -3211,6 +3237,10 @@
       height: 100%;
     }
 
+    .rentz-current-game-box {
+      max-width: min(40%, calc(100% - 2.1rem));
+    }
+
     .rentz-marking-box {
       max-width: min(16rem, 31%);
     }
@@ -3307,7 +3337,7 @@
       max-height: none;
       display: grid;
       grid-template-columns: minmax(0, 1fr) minmax(6.8rem, 31%);
-      grid-template-rows: auto auto 1fr auto;
+      grid-template-rows: auto auto 1fr auto auto;
       align-items: start;
       column-gap: 0.75rem;
       row-gap: 0.85rem;
@@ -3346,10 +3376,44 @@
       transform: none;
     }
 
+    .rentz-current-game-box {
+      position: relative;
+      left: auto;
+      top: auto;
+      align-items: flex-start;
+      justify-content: center;
+      grid-column: 1;
+      grid-row: 4;
+      justify-self: start;
+      width: fit-content;
+      max-width: 70% !important;
+      font-size: 0.72rem;
+      margin: 0;
+      padding: 0.45rem 0.6rem;
+    }
+
+    .rentz-current-game-box .rentz-marking-label {
+      display: none;
+    }
+
+    .rentz-current-game-value {
+      flex: 1 1 auto;
+      width: 100%;
+      max-width: 100%;
+    }
+
+    .rentz-current-game-text-desktop {
+      display: none;
+    }
+
+    .rentz-current-game-text-mobile {
+      display: block;
+    }
+
     .rentz-table-brand {
       position: relative;
       grid-column: 1;
-      grid-row: 4;
+      grid-row: 5;
       left: auto;
       bottom: auto;
       justify-self: start;
@@ -3389,9 +3453,10 @@
       gap: 0.42rem;
     }
 
-    .rentz-trick-board-note {
+    .rentz-turn-timer-note {
       min-height: 1.8rem;
       font-size: 0.7rem;
+      max-width: min(calc(100vw - 6.75rem), 12rem);
       padding: 0.38rem 0.6rem;
     }
 
@@ -3511,6 +3576,10 @@
       min-height: 21.5rem;
     }
 
+    .rentz-current-game-box {
+      max-width: 70% !important;
+    }
+
     .rentz-marking-box {
       max-width: min(14rem, 100%);
       font-size: 0.64rem;
@@ -3534,10 +3603,11 @@
       gap: 0.35rem;
     }
 
-    .rentz-trick-board-note {
+    .rentz-turn-timer-note {
       min-height: 1.68rem;
       font-size: 0.64rem;
       letter-spacing: 0.06em;
+      max-width: min(calc(100vw - 6rem), 10rem);
       padding: 0.34rem 0.52rem;
     }
 

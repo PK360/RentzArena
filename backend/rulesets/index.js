@@ -143,10 +143,14 @@ function evaluateCompiledRuleDelta({ definition, playerCount, initialPoints, han
     })
   );
 
+  const resolvedPoints = definition.type === 'end_game'
+    ? result.TOTAL_POINTS
+    : result.POINTS;
+
   return {
-    delta: result.POINTS - initialPoints,
+    delta: resolvedPoints - initialPoints,
     gameEnded: Boolean(result.gameEnded),
-    points: result.POINTS
+    points: resolvedPoints
   };
 }
 

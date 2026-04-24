@@ -305,6 +305,7 @@ function normalizeRoomSettings(roomSettings) {
     selectedRulesets,
     rulesetPermissions,
     nvAllowed: roomSettings?.nvAllowed ?? true,
+    useTurnTimer: roomSettings?.useTurnTimer ?? true,
     turnTimerSeconds: clampNumber(
       Number(roomSettings?.turnTimerSeconds ?? TURN_TIMER_RANGE.defaultValue),
       TURN_TIMER_RANGE.min,
@@ -586,8 +587,8 @@ function formatMarkingSuit(trickSuit) {
   return `${SUIT_NAMES[trickSuit].toUpperCase()} ${SUIT_SYMBOLS[trickSuit]}`;
 }
 
-function canPlayCard({ card, hand, trickSuit, isMyTurn, trickPending }) {
-  if (!isMyTurn || trickPending) {
+function canPlayCard({ card, hand, trickSuit, isMyTurn, trickPending, isRoundActive = true }) {
+  if (!isRoundActive || !isMyTurn || trickPending) {
     return false;
   }
 
@@ -2468,6 +2469,7 @@ function App() {
       roomName: draftRoomSettings.roomName,
       visibility: draftRoomSettings.visibility,
       nvAllowed: draftRoomSettings.nvAllowed,
+      useTurnTimer: draftRoomSettings.useTurnTimer,
       turnTimerSeconds: draftRoomSettings.turnTimerSeconds,
       selectedRulesets: draftRoomSettings.selectedRulesets,
       rulesetPermissions: draftRoomSettings.rulesetPermissions
@@ -2639,6 +2641,19 @@ function App() {
   const isPlayingRound = gameStarted && !gameFinished && choiceState?.phase === 'playing_round';
   const isRoundStatsPhase = gameStarted && !gameFinished && choiceState?.phase === 'round_stats';
   const isRoundSetupPhase = gameStarted && !gameFinished && !isPlayingRound && !isRoundStatsPhase;
+  const currentGameOptions = choiceState?.availableRulesets?.length
+    ? choiceState.availableRulesets
+    : roomSettings.availableRulesets;
+  const activeRulesetId = choiceState?.activeRulesetId || latestRoundStats?.rulesetId || null;
+  const activeRulesetDefinition = currentGameOptions.find((option) => option.id === activeRulesetId)
+    || roomSettings.availableRulesets.find((option) => option.id === activeRulesetId)
+    || null;
+  const currentGameLabel = activeRulesetDefinition?.label
+    || latestRoundStats?.rulesetLabel
+    || 'Waiting...';
+  const currentGameShortLabel = activeRulesetDefinition?.abbreviation
+    || latestRoundStats?.rulesetAbbreviation
+    || currentGameLabel;
   const hasActiveModal = Boolean(
     (isRecoveryPromptOpen && recoverableGuestProfile) ||
     isRoomSettingsOpen ||
@@ -2662,9 +2677,6 @@ function App() {
   const turnTimerProgress = activeRoundTimerDeadline
     ? clampNumber(turnTimerRemainingMs / Math.max(turnTimerTotalSeconds * 1000, 1), 0, 1)
     : 0;
-  const turnTimerElapsedProgress = activeRoundTimerDeadline
-    ? clampNumber(1 - turnTimerProgress, 0, 1)
-    : 0;
   const turnTimerWarningStage = !activeRoundTimerDeadline
     ? 'normal'
     : turnTimerRemainingSeconds <= 5
@@ -2676,7 +2688,7 @@ function App() {
           : 'normal';
   const fontScalePercent = Math.round(fontScale * 100);
   const pageZoomPercent = Math.round(pageZoom * 100);
-  const isTurnLocked = gameStarted && !gameFinished && (!isMyTurn || trickPending || isChoosingNv || isChoosingRuleset);
+  const isTurnLocked = gameStarted && !gameFinished && (!isPlayingRound || !isMyTurn || trickPending || isChoosingNv || isChoosingRuleset);
   const activeSeatsRemaining = Math.max(0, MAX_ACTIVE_PLAYERS - players.length);
   const areActiveSeatsFull = players.length >= MAX_ACTIVE_PLAYERS;
   const selectedRoomRuleLabels = roomSettings.availableRulesets
@@ -2688,7 +2700,8 @@ function App() {
       hand,
       trickSuit,
       isMyTurn,
-      trickPending
+      trickPending,
+      isRoundActive: isPlayingRound
     });
     return acc;
   }, {});
@@ -2910,6 +2923,15 @@ function App() {
   }, []);
 
   useEffect(() => {
+    if (isPlayingRound) {
+      return;
+    }
+
+    setPendingPlayCard(null);
+    setHoveredCardIndex(null);
+  }, [isPlayingRound]);
+
+  useEffect(() => {
     if (!activeRoundTimerDeadline) {
       return undefined;
     }
@@ -2943,7 +2965,7 @@ function App() {
       turnTimerNoticeTimeoutRef.current = window.setTimeout(() => {
         setTurnTimerNotice('');
         turnTimerNoticeTimeoutRef.current = null;
-      }, 1600);
+      }, 2400);
     };
 
     if (!isPlayingRound || !activeRoundTimerDeadline) {
@@ -3669,6 +3691,13 @@ function App() {
             <div className="rentz-desktop-stage">
               <div className="rentz-table-stage table-felt">
               <div ref={tableStageRef} className="rentz-table-main">
+              <div className="rentz-current-game-box" title={currentGameLabel}>
+                <span className="rentz-marking-label">Current game:</span>
+                <span className="rentz-marking-value is-neutral rentz-current-game-value">
+                  <span className="rentz-current-game-text rentz-current-game-text-desktop">{currentGameLabel}</span>
+                  <span className="rentz-current-game-text rentz-current-game-text-mobile">{`Game: ${currentGameShortLabel}`}</span>
+                </span>
+              </div>
               <div className="rentz-marking-box">
                 <span className="rentz-marking-label">Marking suit:</span>
                 <span
@@ -3739,9 +3768,20 @@ function App() {
                     turnTimerWarningStage === 'quarter' && 'is-quarter',
                     turnTimerWarningStage === 'low' && 'is-low'
                   )}
-                  style={{ '--timer-progress-deg': `${turnTimerElapsedProgress * 360}deg` }}
+                  style={{ '--timer-progress-deg': `${turnTimerProgress * 360}deg` }}
                   aria-label={`${turnTimerRemainingSeconds} seconds left for ${nextTurnPlayer ? getPlayerName(nextTurnPlayer) : 'player'} to play`}
                 >
+                  {turnTimerNotice && (
+                    <div
+                      key={turnTimerNotice}
+                      className="rentz-turn-timer-note"
+                      role="status"
+                      aria-live="polite"
+                    >
+                      <Clock className="rentz-turn-timer-note-icon h-4 w-4" aria-hidden="true" />
+                      <span>{turnTimerNotice}</span>
+                    </div>
+                  )}
                   <div className="rentz-turn-timer-ring" aria-hidden="true">
                     <div className="rentz-turn-timer-face">
                       <span className="rentz-turn-timer-value">{turnTimerRemainingSeconds}</span>
@@ -3805,22 +3845,6 @@ function App() {
                   trickPending={trickPending || Boolean(animatingWinner)}
                   trickWinnerId={trickWinnerId}
                 />
-                {turnTimerNotice && (
-                  <div
-                    key={turnTimerNotice}
-                    className={clsx(
-                      'rentz-trick-board-note',
-                      turnTimerWarningStage === 'half' && 'is-half',
-                      turnTimerWarningStage === 'quarter' && 'is-quarter',
-                      turnTimerWarningStage === 'low' && 'is-low'
-                    )}
-                    role="status"
-                    aria-live="polite"
-                  >
-                    <Clock className="rentz-trick-board-note-icon h-4 w-4" aria-hidden="true" />
-                    <span>{turnTimerNotice}</span>
-                  </div>
-                )}
               </div>
             </div>
             </div>
@@ -4074,7 +4098,16 @@ function App() {
                 const playable = isPlayMode && playableCards[card];
                 const disabled = !playable;
                 const mustFollowSuit = isPlayMode && isMyTurn && trickSuit && !playable && hand.some((handCard) => parseCard(handCard).suit === trickSuit);
-                const shouldGhostCard = isPlayMode && disabled && (mustFollowSuit || isTurnLocked);
+                const roundFinishedEarly = isPlayMode && isRoundStatsPhase && hand.length > 0;
+                const roundInteractionBlocked = isPlayMode && !isPlayingRound;
+                const shouldGhostCard = isPlayMode && disabled && (mustFollowSuit || isTurnLocked || roundInteractionBlocked);
+                const disabledTitle = mustFollowSuit
+                  ? `You must follow ${SUIT_NAMES[trickSuit]}.`
+                  : roundFinishedEarly
+                    ? 'This small game has already ended.'
+                    : roundInteractionBlocked
+                      ? 'Cards cannot be played right now.'
+                      : '';
 
                 const isCardHovered = (hoveredCardIndex !== null ? hoveredCardIndex : (pendingPlayCard ? sortedHand.indexOf(pendingPlayCard) : null)) === index;
 
@@ -4118,7 +4151,7 @@ function App() {
                         : undefined}
                       disabled={disabled}
                       ghosted={shouldGhostCard}
-                      title={mustFollowSuit ? `You must follow ${SUIT_NAMES[trickSuit]}.` : ''}
+                      title={disabledTitle}
                       variant="hand"
                     />
                   </div>
@@ -4422,16 +4455,18 @@ function App() {
           </button>
         </div>
 
-        {editorStatus && (
-          <div className="mt-4 rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">
-            {editorStatus}
-          </div>
-        )}
       </section>
 
       <section className="space-y-5">
         <div className="glass-panel p-5 sm:p-6">
           <h4 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)]">Compiler Preview</h4>
+          <div
+            className="mb-4 flex min-h-[3.35rem] items-center rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]"
+            role="status"
+            aria-live="polite"
+          >
+            {editorStatus || <span className="opacity-0">Editor status</span>}
+          </div>
           {editorAst ? (
             <pre className="max-h-[24rem] overflow-auto rounded-[1.3rem] bg-slate-950/80 p-4 text-xs text-lime-100">
               {JSON.stringify(editorAst, null, 2)}
@@ -4984,6 +5019,14 @@ endif`}
                       label="Allow NV games"
                     />
                   </div>
+                  <div className="flex items-center justify-between gap-3 rounded-[1.1rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3">
+                    <span className="text-sm font-black text-[var(--text-primary)]">Use turn timer</span>
+                    <ToggleCheck
+                      checked={Boolean(draftRoomSettings.useTurnTimer)}
+                      onChange={() => setDraftRoomSettings((current) => ({ ...current, useTurnTimer: !current.useTurnTimer }))}
+                      label="Use turn timer"
+                    />
+                  </div>
                   <label className="rounded-[1.1rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3">
                     <span className="mb-2 flex items-center gap-2 text-sm font-black text-[var(--text-primary)]"><Clock className="h-4 w-4" /> Turn timer</span>
                     <input
@@ -4992,10 +5035,13 @@ endif`}
                       max={TURN_TIMER_RANGE.max}
                       step="5"
                       value={draftRoomSettings.turnTimerSeconds}
+                      disabled={!draftRoomSettings.useTurnTimer}
                       onChange={(event) => setDraftRoomSettings((current) => ({ ...current, turnTimerSeconds: Number(event.target.value) }))}
-                      className="w-full accent-emerald-500"
+                      className="w-full accent-emerald-500 disabled:cursor-not-allowed disabled:opacity-45"
                     />
-                    <span className="text-xs font-bold text-[var(--text-secondary)]">{draftRoomSettings.turnTimerSeconds}s</span>
+                    <span className="text-xs font-bold text-[var(--text-secondary)]">
+                      {draftRoomSettings.useTurnTimer ? `${draftRoomSettings.turnTimerSeconds}s` : 'Timer disabled'}
+                    </span>
                   </label>
                 </div>
               </div>

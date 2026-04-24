@@ -1,6 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert');
 const {
+  applyActiveRulesetAtRoundEnd,
   buildPublicRoomSummary,
   bumpGameStateVersion,
   findNextChooser,
@@ -11,6 +12,7 @@ const {
   sanitizeRulesetPermissions,
   setLobbyMemberRole
 } = require('../socketManager');
+const { compileRuleset } = require('../engine/evaluator');
 
 test('prevents starting a game when the lobby has only one player', () => {
   const error = getStartGameValidationError(
@@ -204,4 +206,62 @@ test('builds public room summaries with avatars and friend markers', () => {
   assert.strictEqual(summary.playerCount, 2);
   assert.strictEqual(summary.avatars[0].avatarUrl, 'alex.png');
   assert.strictEqual(summary.hasFriend, true);
+});
+
+test('applies end_game rulesets once at small-game end using collected cards', () => {
+  const game = {
+    activeRulesetId: 'room_end_game',
+    customRulesets: [{
+      id: 'room_end_game',
+      label: 'Round Reset',
+      abbreviation: 'RR',
+      type: 'end_game',
+      code: 'reset_to(1000, HEART_KING)',
+      compiled: compileRuleset('reset_to(1000, HEART_KING)', 'end_game')
+    }],
+    nvSelected: false,
+    players: [
+      { userId: 'p-1' },
+      { userId: 'p-2' }
+    ],
+    pointsByPlayer: {
+      'p-1': 40,
+      'p-2': 60
+    },
+    collectedByPlayer: {
+      'p-1': [[{ card: 'K-H' }]],
+      'p-2': [[{ card: 'A-S' }]]
+    }
+  };
+
+  const result = applyActiveRulesetAtRoundEnd(game);
+
+  assert.strictEqual(result.applied, true);
+  assert.strictEqual(result.scoreDeltas['p-1'], 960);
+  assert.strictEqual(result.scoreDeltas['p-2'], 0);
+  assert.strictEqual(game.pointsByPlayer['p-1'], 1000);
+  assert.strictEqual(game.pointsByPlayer['p-2'], 60);
+});
+
+test('skips round-end scoring for per_round rulesets', () => {
+  const game = {
+    activeRulesetId: 'room_per_round',
+    customRulesets: [{
+      id: 'room_per_round',
+      label: 'Per Trick',
+      abbreviation: 'PT',
+      type: 'per_round',
+      code: 'add(10)',
+      compiled: compileRuleset('add(10)', 'per_round')
+    }],
+    nvSelected: false,
+    players: [{ userId: 'p-1' }],
+    pointsByPlayer: { 'p-1': 25 },
+    collectedByPlayer: { 'p-1': [] }
+  };
+
+  const result = applyActiveRulesetAtRoundEnd(game);
+
+  assert.deepStrictEqual(result, { applied: false, scoreDeltas: {} });
+  assert.strictEqual(game.pointsByPlayer['p-1'], 25);
 });

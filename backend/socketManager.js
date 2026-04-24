@@ -46,6 +46,7 @@ function serializeRoomSettings(lobby) {
       lobby?.customRulesets
     ),
     nvAllowed: lobby?.nvAllowed ?? true,
+    useTurnTimer: lobby?.useTurnTimer ?? true,
     turnTimerSeconds: sanitizeTurnTimerSeconds(lobby?.turnTimerSeconds),
     visibility: sanitizeRoomVisibility(lobby?.visibility),
     roomName: lobby?.roomName || ''
@@ -720,6 +721,10 @@ function clearGameTimer(game) {
 function scheduleGameTimer(io, roomId, game, callback) {
   clearGameTimer(game);
 
+  if (!game?.useTurnTimer) {
+    return;
+  }
+
   const timerMs = sanitizeTurnTimerSeconds(game.turnTimerSeconds) * 1000;
   game.timerDeadline = Date.now() + timerMs;
   game.timerId = setTimeout(() => {
@@ -814,8 +819,16 @@ function finalizeRoundStats(game) {
 }
 
 function applyActiveRulesetToTrick({ game, playerId, handCards }) {
-  if (!game.activeRulesetId || !getRulesetDefinitionById(game.activeRulesetId, game.customRulesets)) {
+  const activeRuleset = !game.activeRulesetId
+    ? null
+    : getRulesetDefinitionById(game.activeRulesetId, game.customRulesets);
+
+  if (!activeRuleset) {
     return { gameEnded: false, scoreDelta: 0 };
+  }
+
+  if (activeRuleset.type === 'end_game') {
+    return { gameEnded: false, scoreDelta: 0, rawDelta: 0, componentDeltas: null };
   }
 
   const previousPoints = game.pointsByPlayer[playerId] || 0;
@@ -837,6 +850,44 @@ function applyActiveRulesetToTrick({ game, playerId, handCards }) {
     scoreDelta,
     rawDelta: result.delta,
     componentDeltas: result.componentDeltas || null
+  };
+}
+
+function applyActiveRulesetAtRoundEnd(game) {
+  const activeRuleset = !game?.activeRulesetId
+    ? null
+    : getRulesetDefinitionById(game.activeRulesetId, game.customRulesets);
+
+  if (!activeRuleset || activeRuleset.type !== 'end_game') {
+    return { applied: false, scoreDeltas: {} };
+  }
+
+  const scoreDeltas = {};
+  const multiplier = game.nvSelected ? 2 : 1;
+
+  for (const player of game.players) {
+    const playerId = player.userId;
+    const previousPoints = game.pointsByPlayer[playerId] || 0;
+    const collectedCards = (game.collectedByPlayer?.[playerId] || []).flatMap((trick) =>
+      trick.map((play) => play.card)
+    );
+    const result = evaluateRulesetForTrick({
+      rulesetId: game.activeRulesetId,
+      playerCount: game.players.length,
+      initialPoints: previousPoints,
+      handCards: collectedCards,
+      nonDiscardedCards: [],
+      customRulesets: game.customRulesets
+    });
+    const scoreDelta = result.delta * multiplier;
+
+    game.pointsByPlayer[playerId] = previousPoints + scoreDelta;
+    scoreDeltas[playerId] = scoreDelta;
+  }
+
+  return {
+    applied: true,
+    scoreDeltas
   };
 }
 
@@ -1280,6 +1331,9 @@ function playCardForPlayer(io, roomId, playerId, card, { auto = false } = {}) {
     const allHandsEmpty = game.players.every(
       (entry) => (game.handsReady[entry.userId] || []).length === 0
     );
+    if (allHandsEmpty) {
+      applyActiveRulesetAtRoundEnd(game);
+    }
     const gameShouldFinish = allHandsEmpty || ruleResolution.gameEnded;
 
     if (!gameShouldFinish) {
@@ -1382,6 +1436,7 @@ function attachSocketManager(io) {
           [user.userId]: createDefaultPermissionsForPlayer()
         },
         nvAllowed: true,
+        useTurnTimer: true,
         turnTimerSeconds: DEFAULT_TURN_TIMER_SECONDS,
         bannedUserIds: [],
         status: 'waiting'
@@ -1536,6 +1591,7 @@ function attachSocketManager(io) {
       roomName,
       visibility,
       nvAllowed,
+      useTurnTimer,
       turnTimerSeconds,
       selectedRulesets,
       rulesetPermissions
@@ -1551,6 +1607,7 @@ function attachSocketManager(io) {
       lobby.roomName = sanitizeRoomName(roomName ?? lobby.roomName, user);
       lobby.visibility = sanitizeRoomVisibility(visibility ?? lobby.visibility);
       lobby.nvAllowed = typeof nvAllowed === 'boolean' ? nvAllowed : Boolean(lobby.nvAllowed);
+      lobby.useTurnTimer = typeof useTurnTimer === 'boolean' ? useTurnTimer : (lobby.useTurnTimer ?? true);
       lobby.turnTimerSeconds = sanitizeTurnTimerSeconds(turnTimerSeconds ?? lobby.turnTimerSeconds);
       lobby.selectedRulesets = sanitizeRulesetSelections(selectedRulesets, lobby.customRulesets);
       lobby.rulesetPermissions = sanitizeRulesetPermissions(rulesetPermissions, lobby.players, lobby.selectedRulesets, lobby.customRulesets);
@@ -1670,6 +1727,7 @@ function attachSocketManager(io) {
         selectedRulesets: sanitizeRulesetSelections(lobby.selectedRulesets, lobby.customRulesets),
         rulesetPermissions: sanitizeRulesetPermissions(lobby.rulesetPermissions, lobby.players, lobby.selectedRulesets, lobby.customRulesets),
         nvAllowed: Boolean(lobby.nvAllowed),
+        useTurnTimer: lobby.useTurnTimer !== false,
         turnTimerSeconds: sanitizeTurnTimerSeconds(lobby.turnTimerSeconds),
         players: lobby.players.map((player) => ({
           userId: player.userId,
@@ -1868,6 +1926,7 @@ module.exports.bumpGameStateVersion = bumpGameStateVersion;
 module.exports.buildPublicRoomSummary = buildPublicRoomSummary;
 module.exports.findNextChooser = findNextChooser;
 module.exports.getEligibleRuleIdsForPlayer = getEligibleRuleIdsForPlayer;
+module.exports.applyActiveRulesetAtRoundEnd = applyActiveRulesetAtRoundEnd;
 module.exports.removeWaitingLobbyMember = removeWaitingLobbyMember;
 module.exports.sanitizeRulesetPermissions = sanitizeRulesetPermissions;
 module.exports.sanitizeTurnTimerSeconds = sanitizeTurnTimerSeconds;
