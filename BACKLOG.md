@@ -40,11 +40,11 @@ Cards: `TR-08`, `TR-09`, `TR-10`, `TR-11`, `TR-12`, `TR-13`, `TR-39`, `TR-45`
 
 ### Sprint 3 - Ruleset Authoring and Personal Library
 Goal: Let creators preview, save, organize, and navigate their own rulesets cleanly.
-Cards: `TR-28`, `TR-29`, `TR-30`, `TR-31`, `TR-36`, `TR-37`, `TR-38`
+Cards: `TR-28`, `TR-29`, `TR-30`, `TR-31`, `TR-36`, `TR-37`, `TR-38`, `TR-52`
 
 ### Sprint 4 - Lobby Durability and Match Persistence
 Goal: Make live matches resilient through better lobby controls, persistence, reconnect, and backend coverage.
-Cards: `TR-16`, `TR-17`, `TR-18`, `TR-19`, `TR-20`, `TR-27`, `TR-46`
+Cards: `TR-16`, `TR-17`, `TR-18`, `TR-19`, `TR-20`, `TR-27`, `TR-46`, `TR-50`, `TR-51`
 
 ### Sprint 5 - Ruleset-Driven Gameplay and Ruleset Rater
 Goal: Connect selected rulesets to real matches and open up public sharing and rating through the Ruleset Rater.
@@ -291,6 +291,28 @@ Trello checklist:
 - Store enough hand history to support replay or summary views.
 - Make completed matches queryable per user.
 
+#### TR-50 - Require All Players to Ready Up Before Match Start
+Priority: `High Priority`
+Area: `UI`, `API`, `Realtime`
+Maps to: `RA-24`
+
+Trello checklist:
+- Add a ready toggle for each seated player in the lobby.
+- Prevent match start until every occupied seat is marked ready.
+- Reset ready state when player composition or selected ruleset changes.
+- Show clear feedback for who is still blocking match start.
+
+#### TR-51 - Add Game Spectator Flow
+Priority: `Medium Priority`
+Area: `UI`, `API`, `Realtime`
+Maps to: `RA-25`
+
+Trello checklist:
+- Allow eligible users to join a game as spectators without taking a seat.
+- Send spectators a read-only game state with hands hidden where appropriate.
+- Show spectator presence separately from active players in the room or table UI.
+- Prevent spectator actions from triggering gameplay or lobby mutations.
+
 ### Epic D - Gameplay and Rules Engine Integration
 
 #### TR-22 - Let the Host Choose the Ruleset Before Starting
@@ -459,6 +481,17 @@ Trello checklist:
 - Document the actual variable names and command syntax supported by the engine.
 - Add authoring tips for `per_round` versus `end_game`.
 - Link validation errors to guide sections where possible.
+
+#### TR-52 - Support Default, Imported, and Guest-Usable Rulesets
+Priority: `High Priority`
+Area: `UI`, `API`, `Rulesets`
+Maps to: `RA-26`
+
+Trello checklist:
+- Ship a default set of built-in rulesets that can be selected without prior setup.
+- Let users create or paste new rulesets using the same labeled format already used by the app.
+- Support compiling or validating imported rulesets before they can be attached to a game.
+- Allow guests to import or select a ruleset and add it to the current game flow without requiring an account.
 
 ### Epic F - Frontend Structure, UX, and Product Polish
 
@@ -799,6 +832,43 @@ Acceptance criteria:
 - The app records unread invites and social or content notifications.
 - The user can review and dismiss notifications from a dedicated inbox.
 - Notification badges appear in the shell when unread items exist.
+
+### RA-24 - All Players Must Ready Up Before Match Start
+Priority: `High Priority`
+Type: `Functional`
+
+User story:
+As a lobby host, I want every player to confirm readiness before the game starts, so that matches do not begin before everyone is prepared.
+
+Acceptance criteria:
+- Every seated player has a visible ready or not-ready state in the lobby.
+- The start-match action stays disabled or rejected until all occupied seats are ready.
+- Ready state is recalculated when a player leaves, joins, changes seat, or the active ruleset changes.
+
+### RA-25 - Spectate Live Games
+Priority: `Medium Priority`
+Type: `Functional`
+
+User story:
+As a player or guest, I want to spectate an ongoing match, so that I can watch friends play without interrupting the game.
+
+Acceptance criteria:
+- A spectator can join an eligible in-progress game without claiming a player seat.
+- Spectators receive live table updates but cannot perform gameplay actions.
+- Hidden information such as player hands is protected appropriately in spectator view.
+
+### RA-26 - Default, Imported, and Guest-Usable Rulesets
+Priority: `High Priority`
+Type: `Functional`
+
+User story:
+As a host, player, or guest, I want built-in rulesets and a way to import or create new ones in the same labeled format, so that I can quickly attach the right ruleset to a game even without an account.
+
+Acceptance criteria:
+- The app includes default rulesets that are available out of the box.
+- A user can create, paste, or import a ruleset using the existing labeled ruleset format.
+- Imported rulesets are compiled or validated before they can be selected for a game.
+- Guests can use supported rulesets in the lobby and attach them to a game without needing library ownership.
 
 ## Non-Functional User Stories
 
