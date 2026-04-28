@@ -143,6 +143,7 @@ function closeWaitingLobby(io, roomId, lobby, { reason = 'The room was deleted',
     io.sockets.sockets.get(member.socketId)?.leave(roomId);
   });
   lobbies.delete(roomId);
+  console.log(`Room deleted: ${roomId}${reason ? ` (${reason})` : ''}`);
 }
 
 function getAllLobbyMembers(lobby) {
@@ -259,6 +260,11 @@ function createRoomRulesetDefinition(lobby, payload = {}) {
   };
 }
 
+function findCustomRulesetIndex(lobby, rulesetId) {
+  lobby.customRulesets = Array.isArray(lobby.customRulesets) ? lobby.customRulesets : [];
+  return lobby.customRulesets.findIndex((definition) => definition?.id === rulesetId && definition?.source === 'room');
+}
+
 function addCustomRulesetToLobby(lobby, payload = {}) {
   lobby.customRulesets = Array.isArray(lobby.customRulesets) ? lobby.customRulesets : [];
 
@@ -290,6 +296,57 @@ function addCustomRulesetToLobby(lobby, payload = {}) {
   });
   lobby.rulesetPermissions = sanitizeRulesetPermissions(
     nextPermissions,
+    lobby.players,
+    lobby.selectedRulesets,
+    lobby.customRulesets
+  );
+
+  return { definition };
+}
+
+function updateCustomRulesetInLobby(lobby, rulesetId, payload = {}) {
+  const rulesetIndex = findCustomRulesetIndex(lobby, rulesetId);
+  if (rulesetIndex === -1) {
+    return { error: 'Room ruleset not found' };
+  }
+
+  const currentDefinition = lobby.customRulesets[rulesetIndex];
+  let nextDefinition;
+  try {
+    nextDefinition = {
+      ...createRoomRulesetDefinition(lobby, payload),
+      id: currentDefinition.id,
+      source: 'room',
+      createdBy: currentDefinition.createdBy || lobby.hostId,
+      createdAt: currentDefinition.createdAt || Date.now(),
+      updatedAt: Date.now()
+    };
+  } catch (error) {
+    return { error: error.message };
+  }
+
+  lobby.customRulesets[rulesetIndex] = nextDefinition;
+  lobby.selectedRulesets = sanitizeRulesetSelections(lobby.selectedRulesets, lobby.customRulesets);
+  lobby.rulesetPermissions = sanitizeRulesetPermissions(
+    lobby.rulesetPermissions,
+    lobby.players,
+    lobby.selectedRulesets,
+    lobby.customRulesets
+  );
+
+  return { definition: nextDefinition };
+}
+
+function deleteCustomRulesetFromLobby(lobby, rulesetId) {
+  const rulesetIndex = findCustomRulesetIndex(lobby, rulesetId);
+  if (rulesetIndex === -1) {
+    return { error: 'Room ruleset not found' };
+  }
+
+  const [definition] = lobby.customRulesets.splice(rulesetIndex, 1);
+  lobby.selectedRulesets = sanitizeRulesetSelections(lobby.selectedRulesets, lobby.customRulesets);
+  lobby.rulesetPermissions = sanitizeRulesetPermissions(
+    lobby.rulesetPermissions,
     lobby.players,
     lobby.selectedRulesets,
     lobby.customRulesets
@@ -452,15 +509,23 @@ function buildPublicRoomSummary(roomId, lobby, viewer = null) {
       avatarUrl: getAvatarSource(member)
     })),
     hasFriend: members.some((member) => viewerFriends.has(member.userId)),
-    status: lobby.status
+    status: lobby.status,
+    isInGame: lobby.status === 'playing'
   };
 }
 
 function listPublicRoomsForUser(user) {
   return [...lobbies.entries()]
-    .filter(([, lobby]) => lobby.status === 'waiting' && sanitizeRoomVisibility(lobby.visibility) === 'public')
+    .filter(([, lobby]) => ['waiting', 'playing'].includes(lobby.status) && sanitizeRoomVisibility(lobby.visibility) === 'public')
     .filter(([, lobby]) => !lobby.bannedUserIds?.includes(user?.userId))
-    .map(([roomId, lobby]) => buildPublicRoomSummary(roomId, lobby, user));
+    .map(([roomId, lobby]) => buildPublicRoomSummary(roomId, lobby, user))
+    .sort((left, right) => {
+      if (left.status !== right.status) {
+        return left.status === 'waiting' ? -1 : 1;
+      }
+
+      return left.roomName.localeCompare(right.roomName);
+    });
 }
 
 function addMemberToLobby(lobby, user, socketId, { isReady = false } = {}) {
@@ -628,6 +693,7 @@ function serializeChoiceState(game) {
     selectedRulesets: sanitizeRulesetSelections(game.selectedRulesets, game.customRulesets),
     rulesetPermissions: game.rulesetPermissions || {},
     timerDeadline: game.timerDeadline || null,
+    timerRemainingMs: game.timerDeadline ? Math.max(0, game.timerDeadline - Date.now()) : 0,
     availableRulesets: getAvailableRulesets(game.customRulesets)
   };
 }
@@ -1462,7 +1528,7 @@ function attachSocketManager(io) {
     });
 
     // 2. Join a Lobby
-    socket.on('join_lobby', ({ roomId }, callback = () => {}) => {
+    socket.on('join_lobby', ({ roomId, asSpectator = false } = {}, callback = () => {}) => {
       const user = socketToUser.get(socket.id);
       if (!user) return callback({ error: 'Not authenticated' });
 
@@ -1474,11 +1540,25 @@ function attachSocketManager(io) {
 
       const lobby = lobbies.get(normalizedRoomId);
       if (!lobby) return callback({ error: 'Lobby not found' });
-      if (lobby.status !== 'waiting') return callback({ error: 'Game already in progress' });
       if (lobby.bannedUserIds?.includes(user.userId)) return callback({ error: 'You are banned from this room' });
 
       const existingPlayer = lobby.players.find((player) => player.socketId === socket.id || player.userId === user.userId);
       const existingSpectator = lobby.spectators.find((spectator) => spectator.socketId === socket.id || spectator.userId === user.userId);
+      const game = activeGames.get(normalizedRoomId);
+
+      if (!existingPlayer && !existingSpectator && lobby.status === 'playing' && !asSpectator) {
+        return callback({
+          error: 'Game already in progress',
+          canSpectate: true,
+          roomId: normalizedRoomId,
+          roomName: lobby.roomName
+        });
+      }
+
+      if (!['waiting', 'playing'].includes(lobby.status)) {
+        return callback({ error: 'This room is not available right now' });
+      }
+
       let assignment = {
         assignedRole: existingPlayer ? 'player' : 'spectator',
         autoSpectator: false
@@ -1489,13 +1569,32 @@ function attachSocketManager(io) {
         updateLobbyMemberSocket(lobby, user, socket.id);
         socket.join(normalizedRoomId);
         emitLobbyUpdate(io, normalizedRoomId, lobby);
+      } else if (lobby.status === 'playing') {
+        socket.join(normalizedRoomId);
+        lobby.spectators.push(createLobbyMember(user, socket.id, {
+          isReady: false,
+          role: 'spectator'
+        }));
+        assignment = {
+          assignedRole: 'spectator',
+          autoSpectator: true
+        };
+        emitLobbyUpdate(io, normalizedRoomId, lobby);
       } else {
         socket.join(normalizedRoomId);
         assignment = addMemberToLobby(lobby, user, socket.id);
         emitLobbyUpdate(io, normalizedRoomId, lobby);
       }
 
-      callback({ success: true, roomId: normalizedRoomId, lobby: serializeLobby(lobby), ...assignment });
+      callback({
+        success: true,
+        roomId: normalizedRoomId,
+        lobby: serializeLobby(lobby),
+        game: game
+          ? buildGameSessionSnapshot(normalizedRoomId, game, user.userId, { isSpectator: assignment.assignedRole === 'spectator' })
+          : null,
+        ...assignment
+      });
     });
 
     // 3. Toggle Ready Status
@@ -1632,6 +1731,44 @@ function attachSocketManager(io) {
 
       emitLobbyUpdate(io, roomId, lobby, `${result.definition.label} added to the room`);
       callback({ success: true, ruleset: result.definition, lobby: serializeLobby(lobby) });
+    });
+
+    socket.on('update_room_ruleset', ({ roomId, rulesetId, ruleset } = {}, callback = () => {}) => {
+      const lobby = lobbies.get(roomId);
+      const user = socketToUser.get(socket.id);
+
+      if (!lobby) return callback({ error: 'Lobby not found' });
+      if (!user) return callback({ error: 'Not authenticated' });
+      if (!user.guest) return callback({ error: 'Only guest hosts can edit room rulesets' });
+      if (lobby.status !== 'waiting') return callback({ error: 'Room rulesets can only be edited before the match starts' });
+      if (lobby.hostId !== user.userId) return callback({ error: 'Only the host can edit room rulesets' });
+
+      const result = updateCustomRulesetInLobby(lobby, rulesetId, ruleset);
+      if (result.error) {
+        return callback({ error: result.error });
+      }
+
+      emitLobbyUpdate(io, roomId, lobby, `${result.definition.label} updated in the room`);
+      callback({ success: true, ruleset: result.definition, lobby: serializeLobby(lobby) });
+    });
+
+    socket.on('delete_room_ruleset', ({ roomId, rulesetId } = {}, callback = () => {}) => {
+      const lobby = lobbies.get(roomId);
+      const user = socketToUser.get(socket.id);
+
+      if (!lobby) return callback({ error: 'Lobby not found' });
+      if (!user) return callback({ error: 'Not authenticated' });
+      if (!user.guest) return callback({ error: 'Only guest hosts can delete room rulesets' });
+      if (lobby.status !== 'waiting') return callback({ error: 'Room rulesets can only be deleted before the match starts' });
+      if (lobby.hostId !== user.userId) return callback({ error: 'Only the host can delete room rulesets' });
+
+      const result = deleteCustomRulesetFromLobby(lobby, rulesetId);
+      if (result.error) {
+        return callback({ error: result.error });
+      }
+
+      emitLobbyUpdate(io, roomId, lobby, `${result.definition.label} removed from the room`);
+      callback({ success: true, deletedRulesetId: result.definition.id, lobby: serializeLobby(lobby) });
     });
 
     socket.on('transfer_host', ({ roomId, targetUserId }, callback = () => {}) => {
@@ -1930,3 +2067,5 @@ module.exports.applyActiveRulesetAtRoundEnd = applyActiveRulesetAtRoundEnd;
 module.exports.removeWaitingLobbyMember = removeWaitingLobbyMember;
 module.exports.sanitizeRulesetPermissions = sanitizeRulesetPermissions;
 module.exports.sanitizeTurnTimerSeconds = sanitizeTurnTimerSeconds;
+module.exports.updateCustomRulesetInLobby = updateCustomRulesetInLobby;
+module.exports.deleteCustomRulesetFromLobby = deleteCustomRulesetFromLobby;

@@ -8,9 +8,11 @@ const {
   getEligibleRuleIdsForPlayer,
   getStartGameValidationError,
   removeWaitingLobbyMember,
+  deleteCustomRulesetFromLobby,
   sanitizeTurnTimerSeconds,
   sanitizeRulesetPermissions,
-  setLobbyMemberRole
+  setLobbyMemberRole,
+  updateCustomRulesetInLobby
 } = require('../socketManager');
 const { compileRuleset } = require('../engine/evaluator');
 
@@ -206,6 +208,64 @@ test('builds public room summaries with avatars and friend markers', () => {
   assert.strictEqual(summary.playerCount, 2);
   assert.strictEqual(summary.avatars[0].avatarUrl, 'alex.png');
   assert.strictEqual(summary.hasFriend, true);
+  assert.strictEqual(summary.isInGame, false);
+});
+
+test('marks public room summaries when the room is already in a game', () => {
+  const summary = buildPublicRoomSummary(
+    'ZXCVBN',
+    {
+      roomName: 'Busy Table',
+      visibility: 'public',
+      status: 'playing',
+      players: [{ userId: 'p-1', name: 'Alex' }],
+      spectators: [{ userId: 'viewer-1', name: 'Mara' }]
+    }
+  );
+
+  assert.strictEqual(summary.status, 'playing');
+  assert.strictEqual(summary.isInGame, true);
+  assert.strictEqual(summary.spectatorCount, 1);
+});
+
+test('updates and deletes room-scoped custom rulesets in-place', () => {
+  const lobby = {
+    hostId: 'host-1',
+    players: [{ userId: 'host-1' }],
+    customRulesets: [{
+      id: 'room_custom_1',
+      label: 'Old Rule',
+      abbreviation: 'OLD',
+      type: 'per_round',
+      code: 'add(5)',
+      source: 'room',
+      createdBy: 'host-1',
+      createdAt: 1,
+      compiled: compileRuleset('add(5)', 'per_round')
+    }],
+    selectedRulesets: { room_custom_1: true },
+    rulesetPermissions: { 'host-1': { room_custom_1: true } }
+  };
+
+  const updateResult = updateCustomRulesetInLobby(lobby, 'room_custom_1', {
+    longName: 'New Rule',
+    shortName: 'NEW',
+    type: 'end_game',
+    code: 'reset_to(100)'
+  });
+
+  assert.strictEqual(updateResult.error, undefined);
+  assert.strictEqual(lobby.customRulesets[0].id, 'room_custom_1');
+  assert.strictEqual(lobby.customRulesets[0].label, 'New Rule');
+  assert.strictEqual(lobby.customRulesets[0].type, 'end_game');
+  assert.strictEqual(lobby.customRulesets[0].createdAt, 1);
+  assert.strictEqual(typeof lobby.customRulesets[0].updatedAt, 'number');
+
+  const deleteResult = deleteCustomRulesetFromLobby(lobby, 'room_custom_1');
+  assert.strictEqual(deleteResult.error, undefined);
+  assert.strictEqual(lobby.customRulesets.length, 0);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(lobby.selectedRulesets, 'room_custom_1'), false);
+  assert.strictEqual(Object.prototype.hasOwnProperty.call(lobby.rulesetPermissions['host-1'], 'room_custom_1'), false);
 });
 
 test('applies end_game rulesets once at small-game end using collected cards', () => {

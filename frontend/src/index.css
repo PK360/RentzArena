@@ -1474,6 +1474,31 @@
     display: none;
   }
 
+  .rentz-current-game-link {
+    display: block;
+    width: 100%;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-align: inherit;
+  }
+
+  .rentz-current-game-link:hover .rentz-current-game-text,
+  .rentz-current-game-link:focus-visible .rentz-current-game-text {
+    text-decoration: underline;
+    text-decoration-thickness: 0.09em;
+    text-underline-offset: 0.18em;
+  }
+
+  .rentz-current-game-link:focus-visible {
+    outline: 2px solid rgba(255,255,255,0.72);
+    outline-offset: 0.18rem;
+    border-radius: 0.4rem;
+  }
+
   .rentz-marking-value.is-red {
     color: #ff7463;
   }
@@ -1732,6 +1757,19 @@
     --rentz-timer-note-bg-bottom: #fdb4ae;
     --rentz-timer-note-color: #b91c1c;
     --rentz-timer-note-shadow: rgba(249,115,104,0.26);
+  }
+
+  .rentz-turn-timer-box.is-frozen {
+    --rentz-timer-accent: #a3adb7;
+    --rentz-timer-shell-top: rgba(255,255,255,0.82);
+    --rentz-timer-shell-bottom: rgba(206,213,221,0.74);
+    --rentz-timer-note-border: rgba(148,163,184,0.6);
+    --rentz-timer-note-bg-top: #eef2f5;
+    --rentz-timer-note-bg-bottom: #d8e0e7;
+    --rentz-timer-note-color: #51606d;
+    --rentz-timer-note-shadow: rgba(148,163,184,0.18);
+    filter: grayscale(0.25);
+    opacity: 0.82;
   }
 
   .rentz-turn-timer-note {
@@ -2675,6 +2713,40 @@
     padding: 0.78rem 0.75rem;
     vertical-align: middle;
     width: clamp(8.6rem, 22%, 12rem);
+  }
+
+  .rentz-ruleset-row-actions {
+    display: inline-flex;
+    flex: 0 0 auto;
+    gap: 0.35rem;
+  }
+
+  .rentz-ruleset-row-action-button {
+    display: inline-flex;
+    height: 1.7rem;
+    width: 1.95rem;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid rgba(255,255,255,0.48);
+    border-radius: 0.48rem;
+    background: rgba(255,255,255,0.24);
+    color: var(--text-primary);
+    transition: background-color 0.18s ease, transform 0.18s ease, box-shadow 0.18s ease;
+  }
+
+  .rentz-ruleset-row-action-button:hover {
+    background: rgba(255,255,255,0.4);
+    box-shadow: 0 0 0 1px rgba(255,255,255,0.14);
+    transform: translateY(-1px);
+  }
+
+  .rentz-ruleset-row-action-button:focus-visible {
+    outline: 2px solid rgba(125,207,78,0.64);
+    outline-offset: 2px;
+  }
+
+  .rentz-ruleset-row-action-button.is-danger {
+    color: #991b1b;
   }
 
   .rentz-ruleset-grid td {

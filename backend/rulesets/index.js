@@ -85,6 +85,30 @@ function normalizeCustomRulesets(customRulesets = []) {
   return [];
 }
 
+function buildRulesetPreviewCode(definition) {
+  if (definition.code) {
+    return definition.code;
+  }
+
+  if (definition.composite === 'totalPlus') {
+    return [
+      '# Composite ruleset preview',
+      '# Total Plus adds the absolute values of the five classic Rentz base rulesets.',
+      '# This built-in preview is informational and does not round-trip through the compiler.'
+    ].join('\n');
+  }
+
+  if (definition.composite === 'totalMinus') {
+    return [
+      '# Composite ruleset preview',
+      '# Total Minus subtracts the absolute values of the five classic Rentz base rulesets.',
+      '# This built-in preview is informational and does not round-trip through the compiler.'
+    ].join('\n');
+  }
+
+  return '';
+}
+
 function serializeRulesetDefinition(definition) {
   return {
     id: definition.id,
@@ -92,6 +116,7 @@ function serializeRulesetDefinition(definition) {
     abbreviation: definition.abbreviation,
     type: definition.type,
     source: definition.source,
+    code: buildRulesetPreviewCode(definition),
     composite: definition.composite || null,
     enabledByDefault: Boolean(definition.enabledByDefault)
   };

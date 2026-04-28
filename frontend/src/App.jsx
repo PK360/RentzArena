@@ -557,6 +557,14 @@ function formatMetaValue(value, fallback = '--') {
   return `${value}`;
 }
 
+function formatScoreDeltaText(scoreDelta) {
+  if (typeof scoreDelta !== 'number' || scoreDelta === 0) {
+    return '';
+  }
+
+  return `${scoreDelta >= 0 ? '+' : ''}${scoreDelta}`;
+}
+
 function formatDuration(ms = 0) {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));
   const minutes = Math.floor(totalSeconds / 60);
@@ -1357,9 +1365,11 @@ function StatsOverlay({ stats, players, onClose, onContinue, canContinue, matchC
               <div key={`${stats.roundId}-${trick.index}`} className="rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-3">
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <span className="text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Hand {trick.index}</span>
-                  <span className={clsx('rounded-full px-3 py-1 text-xs font-black', trick.scoreDelta >= 0 ? 'bg-emerald-200/80 text-emerald-900' : 'bg-red-200/80 text-red-900')}>
-                    {trick.scoreDelta >= 0 ? '+' : ''}{trick.scoreDelta}
-                  </span>
+                  {trick.scoreDelta !== 0 && (
+                    <span className={clsx('rounded-full px-3 py-1 text-xs font-black', trick.scoreDelta >= 0 ? 'bg-emerald-200/80 text-emerald-900' : 'bg-red-200/80 text-red-900')}>
+                      {formatScoreDeltaText(trick.scoreDelta)}
+                    </span>
+                  )}
                 </div>
                 <div className="mb-3 text-sm font-bold text-[var(--text-secondary)]">
                   Taken by {getPlayerName(playersById.get(trick.takenBy)) || trick.takenByName}
@@ -1451,12 +1461,15 @@ function App() {
   const [isStatsOpen, setIsStatsOpen] = useState(false);
   const [matchCompletePending, setMatchCompletePending] = useState(false);
   const [timerNow, setTimerNow] = useState(() => Date.now());
+  const [localTimerDeadline, setLocalTimerDeadline] = useState(null);
   const [activityFeed, setActivityFeed] = useState([]);
   const [errorMsg, setErrorMsg] = useState('');
   const [finalStandings, setFinalStandings] = useState([]);
   const [topPrompts, setTopPrompts] = useState([]);
   const [turnTimerNotice, setTurnTimerNotice] = useState('');
   const [isSpectatorPopoverOpen, setIsSpectatorPopoverOpen] = useState(false);
+  const [pendingSpectatorJoin, setPendingSpectatorJoin] = useState(null);
+  const [rulesetPreview, setRulesetPreview] = useState(null);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const [desktopStageTightness, setDesktopStageTightness] = useState(0);
   const [handSpreadMetrics, setHandSpreadMetrics] = useState(null);
@@ -1484,6 +1497,7 @@ function App() {
   const [editorCode, setEditorCode] = useState(
     'if(HEART_KING)\n  add(-100)\n  game_end()\nendif'
   );
+  const [editorRoomRulesetId, setEditorRoomRulesetId] = useState(null);
   const [editorStatus, setEditorStatus] = useState('');
   const [editorAst, setEditorAst] = useState(null);
   const [ruleDrafts, setRuleDrafts] = useState(() => {
@@ -1561,6 +1575,8 @@ function App() {
     setDraftRoomSettings(nextRoomSettings);
     setRoomName(response.lobby.roomName || nextRoomSettings.roomName || '');
     setRoomVisibility(response.lobby.visibility || nextRoomSettings.visibility || DEFAULT_ROOM_VISIBILITY);
+    setActivityFeed([]);
+    setErrorMsg('');
 
     if (!restoredGame) {
       setGameStarted(false);
@@ -1573,6 +1589,7 @@ function App() {
       setLatestRoundStats(null);
       setIsStatsOpen(false);
       setMatchCompletePending(false);
+      setFinalStandings([]);
       return;
     }
 
@@ -1646,11 +1663,15 @@ function App() {
     setFinalStandings([]);
     setTopPrompts([]);
     setTurnTimerNotice('');
+    setLocalTimerDeadline(null);
     setIsSpectatorPopoverOpen(false);
+    setPendingSpectatorJoin(null);
+    setRulesetPreview(null);
     setLatestRoundStats(null);
     setIsStatsOpen(false);
     setMatchCompletePending(false);
     setIsRoomSettingsOpen(false);
+    setEditorRoomRulesetId(null);
   }
 
   useEffect(() => {
@@ -1835,7 +1856,7 @@ function App() {
           setCardCounts(nextCardCounts);
         }
         applyPlayerPoints(nextPlayerPoints);
-        setActivityFeed((current) => [`${winnerName} took the hand${typeof scoreDelta === 'number' ? ` (${scoreDelta >= 0 ? '+' : ''}${scoreDelta})` : ''}.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
+        setActivityFeed((current) => [`${winnerName} took the hand${formatScoreDeltaText(scoreDelta) ? ` (${formatScoreDeltaText(scoreDelta)})` : ''}.`, ...current].slice(0, MAX_ACTIVITY_FEED_ITEMS));
       });
     });
 
@@ -2012,6 +2033,77 @@ function App() {
     setRoomVisibility(lobby?.visibility || nextRoomSettings.visibility || DEFAULT_ROOM_VISIBILITY);
   };
 
+  const populateEditorFromRuleset = (ruleset, { linkedRoomRulesetId = null, switchToEditor = false } = {}) => {
+    if (!ruleset) {
+      return;
+    }
+
+    const resolvedLongName = ruleset.longName || ruleset.label || 'Untitled Ruleset';
+    setEditorTitle(resolvedLongName);
+    setEditorShortName(ruleset.shortName || ruleset.abbreviation || buildRulesetShortNameFallback(resolvedLongName));
+    setEditorType(normalizeRulesetType(ruleset.type));
+    setEditorCode(ruleset.code || '');
+    setEditorAst(null);
+    setEditorStatus(linkedRoomRulesetId ? 'Editing room ruleset.' : 'Ruleset loaded into the editor.');
+    setEditorRoomRulesetId(linkedRoomRulesetId);
+    if (switchToEditor) {
+      setActiveTab('editor');
+    }
+  };
+
+  const joinLobbyRequest = (targetRoomId, { asSpectator = false } = {}) => {
+    if (!activeProfile) {
+      showErrorMessage('Choose a guest name or sign in before joining a room.');
+      setActiveTab('play');
+      return;
+    }
+
+    const normalizedRoomId = String(targetRoomId || '').trim().toUpperCase();
+    if (!normalizedRoomId) {
+      return;
+    }
+
+    socket.emit('authenticate', activeProfile);
+    socket.emit('join_lobby', { roomId: normalizedRoomId, asSpectator }, (response) => {
+      if (response?.success) {
+        setPendingSpectatorJoin(null);
+        updateStoredGuestRoom(response.roomId);
+        applyRestoredSession({
+          success: true,
+          roomId: response.roomId,
+          lobby: response.lobby,
+          game: response.game || null
+        });
+        if (response.autoSpectator) {
+          showTopPrompt(
+            asSpectator
+              ? `You joined ${response.lobby?.roomName || response.roomId} as a spectator.`
+              : `All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`,
+            'info'
+          );
+        }
+        return;
+      }
+
+      if (response?.canSpectate) {
+        setPendingSpectatorJoin({
+          roomId: response.roomId || normalizedRoomId,
+          roomName: response.roomName || response.roomId || normalizedRoomId
+        });
+        return;
+      }
+
+      if (response?.error === 'Game already in progress') {
+        showTopPrompt(response.error, 'error');
+        return;
+      }
+
+      if (response?.error) {
+        showErrorMessage(response.error);
+      }
+    });
+  };
+
   const showErrorMessage = (message) => {
     setErrorMsg(message);
     window.setTimeout(() => setErrorMsg(''), 3000);
@@ -2144,39 +2236,11 @@ function App() {
   };
 
   const handleJoinLobby = () => {
-    if (!activeProfile) {
-      showErrorMessage('Choose a guest name or sign in before joining a room.');
-      setActiveTab('play');
-      return;
-    }
-
     if (!joinInput.trim()) {
       return;
     }
 
-    socket.emit('authenticate', activeProfile);
-    socket.emit('join_lobby', { roomId: joinInput.toUpperCase() }, (response) => {
-      if (response.success) {
-        updateStoredGuestRoom(response.roomId);
-        setRoomId(response.roomId);
-        setInLobby(true);
-        setGameStarted(false);
-        setIsSpectatingGame(false);
-        setGameFinished(false);
-        setFinalStandings([]);
-        setIsPublicBrowserOpen(false);
-        applyLobbyState(response.lobby);
-        if (response.autoSpectator) {
-          showTopPrompt(`All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`, 'info');
-        }
-      } else if (response.error) {
-        if (response.error === 'Game already in progress') {
-          showTopPrompt(response.error, 'error');
-        } else {
-          showErrorMessage(response.error);
-        }
-      }
-    });
+    joinLobbyRequest(joinInput);
   };
 
   const getEditorRulesetPayload = () => {
@@ -2272,21 +2336,16 @@ function App() {
         return;
       }
 
-      setEditorTitle(importedRuleset.longName);
-      setEditorShortName(importedRuleset.shortName);
-      setEditorType(importedRuleset.type);
-      setEditorCode(importedRuleset.code);
-      setEditorAst(null);
-      setEditorStatus('Ruleset imported.');
+      populateEditorFromRuleset(importedRuleset);
     } catch (error) {
       setEditorStatus(error.message);
       setEditorAst(null);
     }
   };
 
-  const addRulesetToCurrentRoom = (rulesetPayload, { updateEditorStatus = false } = {}) => {
+  const saveRulesetToCurrentRoom = (rulesetPayload, { updateEditorStatus = false, roomRulesetId = editorRoomRulesetId } = {}) => {
     if (!activeProfile?.guest || !inLobby || !amIHost || gameStarted) {
-      const message = 'Only a guest host can add room rulesets before the match starts.';
+      const message = 'Only a guest host can manage room rulesets before the match starts.';
       if (updateEditorStatus) {
         setEditorStatus(message);
       }
@@ -2295,12 +2354,13 @@ function App() {
     }
 
     if (updateEditorStatus) {
-      setEditorStatus('Compiling and applying ruleset...');
+      setEditorStatus(roomRulesetId ? 'Compiling and updating ruleset...' : 'Compiling and applying ruleset...');
     }
 
     socket.emit('authenticate', activeProfile);
-    socket.emit('add_room_ruleset', {
+    socket.emit(roomRulesetId ? 'update_room_ruleset' : 'add_room_ruleset', {
       roomId,
+      ...(roomRulesetId ? { rulesetId: roomRulesetId } : {}),
       ruleset: rulesetPayload
     }, (response) => {
       if (response?.error) {
@@ -2316,15 +2376,19 @@ function App() {
         applyLobbyState(response.lobby);
       }
 
-      if (updateEditorStatus) {
-        setEditorStatus('Ruleset added to the current room.');
+      if (response?.ruleset?.id) {
+        setEditorRoomRulesetId(response.ruleset.id);
       }
-      showTopPrompt(`${rulesetPayload.longName || 'Ruleset'} added to the room.`, 'success');
+
+      if (updateEditorStatus) {
+        setEditorStatus(roomRulesetId ? 'Ruleset updated in the current room.' : 'Ruleset added to the current room.');
+      }
+      showTopPrompt(`${rulesetPayload.longName || 'Ruleset'} ${roomRulesetId ? 'updated in' : 'added to'} the room.`, 'success');
     });
   };
 
   const handleApplyEditorRulesetToRoom = () => {
-    addRulesetToCurrentRoom(getEditorRulesetPayload(), { updateEditorStatus: true });
+    saveRulesetToCurrentRoom(getEditorRulesetPayload(), { updateEditorStatus: true });
   };
 
   const handleImportRentzToRoom = async (event) => {
@@ -2334,7 +2398,7 @@ function App() {
         return;
       }
 
-      addRulesetToCurrentRoom(importedRuleset);
+      saveRulesetToCurrentRoom(importedRuleset, { roomRulesetId: null });
     } catch (error) {
       showErrorMessage(error.message);
     }
@@ -2414,25 +2478,7 @@ function App() {
       return;
     }
 
-    socket.emit('authenticate', activeProfile);
-    socket.emit('join_lobby', { roomId: targetRoomId }, (response) => {
-      if (response.success) {
-        updateStoredGuestRoom(response.roomId);
-        setRoomId(response.roomId);
-        setInLobby(true);
-        setGameStarted(false);
-        setIsSpectatingGame(false);
-        setGameFinished(false);
-        setFinalStandings([]);
-        setIsPublicBrowserOpen(false);
-        applyLobbyState(response.lobby);
-        if (response.autoSpectator) {
-          showTopPrompt(`All ${MAX_ACTIVE_PLAYERS} player seats are full. You joined as a spectator.`, 'info');
-        }
-      } else if (response.error) {
-        showErrorMessage(response.error);
-      }
-    });
+    joinLobbyRequest(targetRoomId);
   };
 
   const handleOpenRoomSettings = () => {
@@ -2657,6 +2703,8 @@ function App() {
   const hasActiveModal = Boolean(
     (isRecoveryPromptOpen && recoverableGuestProfile) ||
     isRoomSettingsOpen ||
+    pendingSpectatorJoin ||
+    rulesetPreview ||
     isChoosingNv ||
     isChoosingRuleset ||
     (isStatsOpen && latestRoundStats)
@@ -2668,7 +2716,7 @@ function App() {
     !matchCompletePending &&
     !gameFinished
   );
-  const activeRoundTimerDeadline = isPlayingRound ? choiceState?.timerDeadline : null;
+  const activeRoundTimerDeadline = isPlayingRound ? localTimerDeadline : null;
   const turnTimerRemainingMs = activeRoundTimerDeadline
     ? Math.max(0, activeRoundTimerDeadline - timerNow)
     : 0;
@@ -2694,6 +2742,9 @@ function App() {
   const selectedRoomRuleLabels = roomSettings.availableRulesets
     .filter((option) => roomSettings.selectedRulesets[option.id])
     .map((option) => option.abbreviation || option.label);
+  const isViewingEditableRoomRuleset = Boolean(
+    editorRoomRulesetId && roomSettings.availableRulesets.some((option) => option.id === editorRoomRulesetId)
+  );
   const playableCards = hand.reduce((acc, card) => {
     acc[card] = canPlayCard({
       card,
@@ -2930,6 +2981,15 @@ function App() {
     setPendingPlayCard(null);
     setHoveredCardIndex(null);
   }, [isPlayingRound]);
+
+  useEffect(() => {
+    if (!isPlayingRound || typeof choiceState?.timerRemainingMs !== 'number' || !choiceState?.timerDeadline) {
+      setLocalTimerDeadline(null);
+      return;
+    }
+
+    setLocalTimerDeadline(Date.now() + Math.max(0, choiceState.timerRemainingMs));
+  }, [choiceState?.timerDeadline, choiceState?.timerRemainingMs, isPlayingRound]);
 
   useEffect(() => {
     if (!activeRoundTimerDeadline) {
@@ -3535,7 +3595,7 @@ function App() {
         </div>
       ) : publicRooms.length === 0 ? (
         <div className="glass-panel p-6 text-center text-sm font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">
-          No public rooms are waiting right now.
+          No public rooms are available right now.
         </div>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
@@ -3546,6 +3606,7 @@ function App() {
                   <div className="truncate text-xl font-black text-[var(--text-primary)]">{room.roomName}</div>
                   <div className="mt-1 flex flex-wrap items-center gap-2 text-xs font-extrabold uppercase tracking-[0.16em] text-[var(--text-secondary)]">
                     <span>{room.playerCount}/{room.maxPlayers} players</span>
+                    {room.isInGame && <span className="rounded-full bg-amber-200/85 px-2 py-1 text-amber-900">In game</span>}
                     {room.hasFriend && <span className="rounded-full bg-emerald-200/80 px-2 py-1 text-emerald-900">Friend here</span>}
                   </div>
                 </div>
@@ -3565,7 +3626,17 @@ function App() {
               <button
                 type="button"
                 disabled={inLobby || gameStarted}
-                onClick={() => joinPublicRoom(room.roomId)}
+                onClick={() => {
+                  if (room.isInGame) {
+                    setPendingSpectatorJoin({
+                      roomId: room.roomId,
+                      roomName: room.roomName
+                    });
+                    return;
+                  }
+
+                  joinPublicRoom(room.roomId);
+                }}
                 className={clsx(
                   'w-full rounded-[1.3rem] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] transition',
                   inLobby || gameStarted
@@ -3573,7 +3644,7 @@ function App() {
                     : 'frutiger-button'
                 )}
               >
-                {inLobby || gameStarted ? 'Already in a room' : 'Join public room'}
+                {inLobby || gameStarted ? 'Already in a room' : room.isInGame ? 'Spectate active room' : 'Join public room'}
               </button>
             </article>
           ))}
@@ -3694,8 +3765,22 @@ function App() {
               <div className="rentz-current-game-box" title={currentGameLabel}>
                 <span className="rentz-marking-label">Current game:</span>
                 <span className="rentz-marking-value is-neutral rentz-current-game-value">
-                  <span className="rentz-current-game-text rentz-current-game-text-desktop">{currentGameLabel}</span>
-                  <span className="rentz-current-game-text rentz-current-game-text-mobile">{`Game: ${currentGameShortLabel}`}</span>
+                  {activeRulesetDefinition?.code ? (
+                    <button
+                      type="button"
+                      onClick={() => setRulesetPreview(activeRulesetDefinition)}
+                      className="rentz-current-game-link"
+                      title="Preview active ruleset code"
+                    >
+                      <span className="rentz-current-game-text rentz-current-game-text-desktop">{currentGameLabel}</span>
+                      <span className="rentz-current-game-text rentz-current-game-text-mobile">{`Game: ${currentGameShortLabel}`}</span>
+                    </button>
+                  ) : (
+                    <>
+                      <span className="rentz-current-game-text rentz-current-game-text-desktop">{currentGameLabel}</span>
+                      <span className="rentz-current-game-text rentz-current-game-text-mobile">{`Game: ${currentGameShortLabel}`}</span>
+                    </>
+                  )}
                 </span>
               </div>
               <div className="rentz-marking-box">
@@ -3766,12 +3851,13 @@ function App() {
                     'rentz-turn-timer-box',
                     turnTimerWarningStage === 'half' && 'is-half',
                     turnTimerWarningStage === 'quarter' && 'is-quarter',
-                    turnTimerWarningStage === 'low' && 'is-low'
+                    turnTimerWarningStage === 'low' && 'is-low',
+                    !isMyTurn && 'is-frozen'
                   )}
                   style={{ '--timer-progress-deg': `${turnTimerProgress * 360}deg` }}
                   aria-label={`${turnTimerRemainingSeconds} seconds left for ${nextTurnPlayer ? getPlayerName(nextTurnPlayer) : 'player'} to play`}
                 >
-                  {turnTimerNotice && (
+                  {isMyTurn && turnTimerNotice && (
                     <div
                       key={turnTimerNotice}
                       className="rentz-turn-timer-note"
@@ -4344,7 +4430,10 @@ function App() {
               Create, edit, and validate custom Rentz rules before you bring them into a match.
             </p>
           </div>
-          <div className="status-pill px-4 py-2">{editorType.replace('_', ' ')}</div>
+          <div className="flex flex-wrap gap-2">
+            {isViewingEditableRoomRuleset && <div className="status-pill px-4 py-2">linked to room</div>}
+            <div className="status-pill px-4 py-2">{editorType.replace('_', ' ')}</div>
+          </div>
         </div>
 
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(8rem,12rem)_auto]">
@@ -4439,8 +4528,8 @@ function App() {
                 <Sparkles className="h-5 w-5" />
               </span>
               <span className="rentz-editor-action-copy">
-                <span className="rentz-editor-action-title">Apply to Room</span>
-                <span className="rentz-editor-action-meta">Push this ruleset straight into the current room.</span>
+                <span className="rentz-editor-action-title">{isViewingEditableRoomRuleset ? 'Update Room Ruleset' : 'Apply to Room'}</span>
+                <span className="rentz-editor-action-meta">{isViewingEditableRoomRuleset ? 'Save these edits back into the linked room ruleset.' : 'Push this ruleset straight into the current room.'}</span>
               </span>
             </button>
           )}
@@ -4490,11 +4579,15 @@ function App() {
                 <button
                   key={draft.id}
                   onClick={() => {
-                    setEditorTitle(draft.title);
-                    setEditorShortName(draft.shortName || buildRulesetShortNameFallback(draft.title));
-                    setEditorType(draft.type);
-                    setEditorCode(draft.code);
-                    setActiveTab('editor');
+                    populateEditorFromRuleset({
+                      longName: draft.title,
+                      shortName: draft.shortName,
+                      type: draft.type,
+                      code: draft.code
+                    }, {
+                      linkedRoomRulesetId: null,
+                      switchToEditor: true
+                    });
                   }}
                   className="w-full rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] px-4 py-3 text-left transition hover:bg-[var(--surface-soft)]"
                 >
@@ -4594,28 +4687,28 @@ function App() {
             <h4 className="mb-3 text-xl font-bold text-[var(--text-primary)]">Variables</h4>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-                <strong className="text-base text-[var(--text-primary)]">POINTS</strong>
-                <p className="mt-1 text-xs">The current score of the player.</p>
+                <strong className="text-base text-[var(--text-primary)]">PLAYER_COUNT</strong>
+                <p className="mt-1 text-xs">How many active players are in the current match.</p>
               </div>
               <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-                <strong className="text-base text-[var(--text-primary)]">TRICKS_WON</strong>
-                <p className="mt-1 text-xs">The number of tricks currently won by the player.</p>
-              </div>
-              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-                <strong className="text-base text-[var(--text-primary)]">[SUIT]_COUNT</strong>
-                <p className="mt-1 text-xs">Number of specific suits captured (e.g. <code>HEART_COUNT</code>, <code>SPADE_COUNT</code>).</p>
-              </div>
-              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-                <strong className="text-base text-[var(--text-primary)]">[SUIT]_[VALUE]</strong>
-                <p className="mt-1 text-xs">Boolean if the specific card was captured (e.g. <code>HEART_KING</code>, <code>DIAMOND_JACK</code>).</p>
+                <strong className="text-base text-[var(--text-primary)]">INITIAL_POINTS / POINTS / TOTAL_POINTS</strong>
+                <p className="mt-1 text-xs">Starting score, current score, and the running total used by <code>end_game</code> rulesets.</p>
               </div>
               <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
                 <strong className="text-base text-[var(--text-primary)]">CARD_NR</strong>
-                <p className="mt-1 text-xs">The total number of cards currently collected by the player.</p>
+                <p className="mt-1 text-xs">How many cards are in the captured hand being evaluated.</p>
               </div>
               <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
-                <strong className="text-base text-[var(--text-primary)]">PLAYER_COUNT</strong>
-                <p className="mt-1 text-xs">The total number of players in the game.</p>
+                <strong className="text-base text-[var(--text-primary)]">[SUIT]_NR / TOTAL_[SUIT]_NR</strong>
+                <p className="mt-1 text-xs">Suit counts in the captured hand and in the remaining non-discarded cards, for example <code>HEART_NR</code> or <code>TOTAL_SPADE_NR</code>.</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">[VALUE]_NR / TOTAL_[VALUE]_NR</strong>
+                <p className="mt-1 text-xs">Value counts in the captured hand and in the remaining deck state, like <code>K_NR</code> or <code>TOTAL_10_NR</code>.</p>
+              </div>
+              <div className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <strong className="text-base text-[var(--text-primary)]">[SUIT]_[VALUE]</strong>
+                <p className="mt-1 text-xs">Card-presence booleans such as <code>HEART_K</code> or <code>DIAMOND_Q</code>. Long aliases like <code>HEART_KING</code> also work.</p>
               </div>
             </div>
           </section>
@@ -4633,15 +4726,15 @@ function App() {
               </li>
               <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
                 <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">reset_to(value)</code>
-                <p className="mt-1">Resets the score back to a default value, optionally taking an expression.</p>
+                <p className="mt-1">Only for <code>end_game</code> rulesets. Sets <code>TOTAL_POINTS</code> to the supplied value.</p>
               </li>
               <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
                 <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">end()</code>
-                <p className="mt-1">Instantly ends the current round context execution.</p>
+                <p className="mt-1">Stops evaluating the current ruleset immediately.</p>
               </li>
               <li className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
                 <code className="rounded bg-[var(--surface-code-inline)] px-1 font-mono text-base font-bold text-[var(--text-primary)]">game_end()</code>
-                <p className="mt-1">Forces the game to conclude and proceeds to final standings.</p>
+                <p className="mt-1">Only for <code>per_round</code> rulesets. Ends the overall match after this rule resolves.</p>
               </li>
             </ul>
           </section>
@@ -4662,11 +4755,11 @@ function App() {
             <pre className="overflow-x-auto rounded-[1.3rem] bg-slate-950/85 p-6 font-mono text-sm leading-relaxed text-lime-100 shadow-inner">
               {`if (HEART_KING)
   add(-100)
-elif (HEART_COUNT > 0)
-  add(HEART_COUNT * -20)
+elif (HEART_NR > 0)
+  add(HEART_NR * -20)
 endif
 
-if (TRICKS_WON == 0 and POINTS < -50)
+if (CARD_NR == 0 and POINTS < -50)
   set_to(0)
   end()
 endif
@@ -5068,6 +5161,7 @@ endif`}
                     type="button"
                     onClick={() => {
                       setIsRoomSettingsOpen(false);
+                      setEditorRoomRulesetId(null);
                       setActiveTab('editor');
                     }}
                     className="inline-flex items-center justify-center gap-2 rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
@@ -5101,9 +5195,55 @@ endif`}
                   {draftRoomSettings.availableRulesets.map((option) => (
                     <tr key={option.id}>
                       <th className="rentz-ruleset-row-header text-left">
-                        <div className="text-lg font-black text-[var(--text-primary)]">{option.abbreviation || option.label}</div>
-                        <div className="text-xs font-bold text-[var(--text-secondary)]">
-                          {option.label}{option.source === 'room' ? ' (room)' : ''}
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-lg font-black text-[var(--text-primary)]">{option.abbreviation || option.label}</div>
+                            <div className="text-xs font-bold text-[var(--text-secondary)]">
+                              {option.label}{option.source === 'room' ? ' (room)' : ''}
+                            </div>
+                          </div>
+                          {option.source === 'room' && (
+                            <div className="rentz-ruleset-row-actions">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  populateEditorFromRuleset(option, {
+                                    linkedRoomRulesetId: option.id,
+                                    switchToEditor: true
+                                  });
+                                  setIsRoomSettingsOpen(false);
+                                }}
+                                className="rentz-ruleset-row-action-button"
+                                title="Open this room ruleset in the editor"
+                              >
+                                <FileCode2 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  socket.emit('delete_room_ruleset', { roomId, rulesetId: option.id }, (response) => {
+                                    if (response?.error) {
+                                      showErrorMessage(response.error);
+                                      return;
+                                    }
+
+                                    if (response?.lobby) {
+                                      applyLobbyState(response.lobby);
+                                      setDraftRoomSettings(normalizeRoomSettings(response.lobby.roomSettings));
+                                    }
+                                    if (editorRoomRulesetId === option.id) {
+                                      setEditorRoomRulesetId(null);
+                                    }
+                                    showTopPrompt(`${option.label} removed from the room.`, 'info');
+                                  });
+                                }}
+                                className="rentz-ruleset-row-action-button is-danger"
+                                title="Delete this room ruleset"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </th>
                       <td className="text-center">
@@ -5167,6 +5307,62 @@ endif`}
                 </button>
               </div>
             </section>
+          </div>
+        </ModalShell>
+      )}
+
+      {pendingSpectatorJoin && (
+        <ModalShell
+          title="Game In Progress"
+          eyebrow="Join as spectator"
+          onClose={() => setPendingSpectatorJoin(null)}
+          footer={(
+            <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setPendingSpectatorJoin(null)}
+                className="rounded-[1.3rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => joinLobbyRequest(pendingSpectatorJoin.roomId, { asSpectator: true })}
+                className="frutiger-button px-5 py-3 text-sm uppercase tracking-[0.14em]"
+              >
+                Spectate room
+              </button>
+            </div>
+          )}
+        >
+          <div className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 text-sm font-semibold leading-6 text-[var(--text-secondary)] sm:text-base">
+            <span className="font-black text-[var(--text-primary)]">{pendingSpectatorJoin.roomName || pendingSpectatorJoin.roomId}</span> is already in a game. You can still enter the room as a spectator.
+          </div>
+        </ModalShell>
+      )}
+
+      {rulesetPreview && (
+        <ModalShell
+          title={rulesetPreview.label || 'Ruleset Preview'}
+          eyebrow="Full .rentz file"
+          onClose={() => setRulesetPreview(null)}
+          wide
+          bodyClassName="mt-5 min-h-0 flex-1 overflow-auto pr-1"
+        >
+          <div
+            className="rounded-[1.45rem] p-1.5 shadow-[inset_0_2px_10px_rgba(0,0,0,0.42),inset_0_-10px_24px_rgba(0,0,0,0.32)]"
+            style={{
+              background: 'linear-gradient(180deg, rgba(20,27,45,0.96) 0%, rgba(7,11,22,0.99) 100%)'
+            }}
+          >
+            <pre className="overflow-auto rounded-[1.1rem] bg-[linear-gradient(180deg,rgba(3,7,18,0.96)_0%,rgba(2,6,23,0.99)_100%)] p-5 text-xs leading-6 text-lime-100 shadow-[inset_0_1px_10px_rgba(0,0,0,0.5)]" data-rentz-modal-scroll="x">
+              {formatRentzRuleset({
+                longName: rulesetPreview.label,
+                shortName: rulesetPreview.abbreviation,
+                type: rulesetPreview.type,
+                code: rulesetPreview.code
+              })}
+            </pre>
           </div>
         </ModalShell>
       )}
