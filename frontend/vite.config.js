@@ -7,6 +7,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:4000',
+      '/media': 'http://localhost:4000',
       '/socket.io': {
         target: 'ws://localhost:4000',
         ws: true

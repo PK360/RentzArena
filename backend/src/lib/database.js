@@ -9,6 +9,7 @@ const READY_STATE_LABELS = {
 };
 
 let activeConnectionPromise = null;
+let userIndexReconciliationPromise = null;
 
 function getMongoUri() {
   return process.env.MONGODB_URI || DEFAULT_MONGODB_URI;
@@ -46,7 +47,39 @@ async function connectToMongo() {
     });
 
   await activeConnectionPromise;
+  await reconcileUserIndexes();
   return mongoose.connection;
+}
+
+async function reconcileUserIndexes() {
+  if (userIndexReconciliationPromise) {
+    await userIndexReconciliationPromise;
+    return;
+  }
+
+  userIndexReconciliationPromise = (async () => {
+    const User = require('../../models/User');
+    const collection = User.collection;
+    const existingIndexes = await collection.indexes();
+    const obsoleteUniqueEmailIndex = existingIndexes.find((index) => (
+      index?.name === 'email_1'
+      && index?.unique
+      && index?.key
+      && Object.keys(index.key).length === 1
+      && index.key.email === 1
+    ));
+
+    if (obsoleteUniqueEmailIndex) {
+      await collection.dropIndex(obsoleteUniqueEmailIndex.name);
+      console.warn('Dropped obsolete users.email_1 unique index during MongoDB startup reconciliation.');
+    }
+
+    await User.syncIndexes();
+  })().finally(() => {
+    userIndexReconciliationPromise = null;
+  });
+
+  await userIndexReconciliationPromise;
 }
 
 async function disconnectFromMongo() {

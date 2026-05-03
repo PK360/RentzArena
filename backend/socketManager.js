@@ -1,6 +1,8 @@
 const Game = require('./models/Game');
-const User = require('./models/User');
 const { randomFriendCode } = require('./utils/helpers');
+const { createSelectedRulesetsFromLoadout } = require('./src/lib/accountRulesets');
+const { DEFAULT_PROFILE_PICTURE_PATH } = require('./src/lib/accountAssets');
+const { getAuthenticatedUserFromCookieHeader, serializeAccount } = require('./src/lib/auth');
 const { generateDeck, shuffle, dealCards } = require('./utils/cards');
 const {
   DEFAULT_RULESET_SELECTIONS,
@@ -28,6 +30,7 @@ const ROOM_RULESET_NAME_MAX_LENGTH = 80;
 const ROOM_RULESET_ABBREVIATION_MAX_LENGTH = 12;
 const ROOM_RULESET_CODE_MAX_LENGTH = 20000;
 const RULESET_TYPES = new Set(['per_round', 'end_game']);
+const EMOJI_REACTION_IDS = new Set(['grin', 'wink', 'laugh', 'shock', 'love', 'gg']);
 const SUIT_NAMES = {
   H: 'Hearts',
   D: 'Diamonds',
@@ -188,6 +191,27 @@ function sanitizeTurnTimerSeconds(value) {
 
 function getUserDisplayName(user) {
   return user?.displayName || user?.name || 'Player';
+}
+
+function normalizeGuestSocketUser(userData = {}) {
+  if (!userData?.guest) {
+    return null;
+  }
+
+  const userId = String(userData.userId || '').trim();
+  const name = String(userData.name || userData.displayName || '').trim();
+
+  if (!userId || !name) {
+    return null;
+  }
+
+  return {
+    userId,
+    name,
+    displayName: name,
+    guest: true,
+    avatarUrl: DEFAULT_PROFILE_PICTURE_PATH
+  };
 }
 
 function getDefaultRoomName(user) {
@@ -362,7 +386,7 @@ function getAvatarSource(member) {
     member?.profileImageUrl ||
     member?.profileImage ||
     member?.image ||
-    null
+    DEFAULT_PROFILE_PICTURE_PATH
   );
 }
 
@@ -427,6 +451,16 @@ function updateLobbyMemberSocket(lobby, user, socketId) {
   member.socketId = socketId;
   member.name = user.name || member.name;
   member.displayName = user.displayName || member.displayName;
+  member.avatarUrl = getAvatarSource(user) || member.avatarUrl || null;
+  member.guest = Boolean(user.guest);
+  member.banner = user.banner || member.banner || '';
+  member.description = user.description || member.description || '';
+  member.favouriteRulesets = Array.isArray(user.favouriteRulesets)
+    ? [...user.favouriteRulesets]
+    : (member.favouriteRulesets || []);
+  member.rulesetLoadout = Array.isArray(user.rulesetLoadout)
+    ? [...user.rulesetLoadout]
+    : (member.rulesetLoadout || []);
   member.isConnected = true;
   return member;
 }
@@ -1256,6 +1290,30 @@ function scheduleWaitingLobbyDisconnectCleanup(io, roomId, lobby, member, discon
   pendingLobbyDisconnects.set(getLobbyDisconnectKey(roomId, member.userId), timeoutId);
 }
 
+function removeWaitingLobbyMemberOnDisconnect(io, roomId, lobby, member) {
+  const outcome = removeWaitingLobbyMember(lobby, member.userId);
+  if (!outcome) {
+    return;
+  }
+
+  if (outcome.shouldDeleteRoom) {
+    closeWaitingLobby(io, roomId, lobby, {
+      reason: 'The room closed because no active players remained.'
+    });
+    return;
+  }
+
+  const nextHost = outcome.nextHostId ? getMemberByUserId(lobby, outcome.nextHostId) : null;
+  emitLobbyUpdate(
+    io,
+    roomId,
+    lobby,
+    outcome.hostChanged && nextHost
+      ? `${getUserDisplayName(outcome.member)} left the room. ${getUserDisplayName(nextHost)} is now host.`
+      : `${getUserDisplayName(outcome.member)} left the room.`
+  );
+}
+
 function playCardForPlayer(io, roomId, playerId, card, { auto = false } = {}) {
   const game = activeGames.get(roomId);
   if (!game) {
@@ -1436,19 +1494,36 @@ function playCardForPlayer(io, roomId, playerId, card, { auto = false } = {}) {
 }
 
 function attachSocketManager(io) {
-  io.on('connection', (socket) => {
+  io.on('connection', async (socket) => {
     console.log('User connected:', socket.id);
 
-    // Basic authentication simulation for socket (in final, verify JWT or magic link)
-    socket.on('authenticate', (userData) => {
-      if (!userData?.userId) {
+    try {
+      const authenticatedAccount = await getAuthenticatedUserFromCookieHeader(socket.handshake.headers.cookie || '');
+      if (authenticatedAccount) {
+        const accountProfile = serializeAccount(authenticatedAccount);
+        socketToUser.set(socket.id, accountProfile);
+        console.log(`Socket ${socket.id} authenticated via account session as ${accountProfile.username}`);
+      }
+    } catch (error) {
+      console.warn(`Socket ${socket.id} session lookup failed: ${error.message}`);
+    }
+
+    socket.on('authenticate', (userData, callback = () => {}) => {
+      const currentUser = socketToUser.get(socket.id);
+      if (currentUser && !currentUser.guest) {
+        callback({ success: true, user: currentUser, source: 'account' });
         return;
       }
 
-      socketToUser.set(socket.id, userData);
-      console.log(
-        `Socket ${socket.id} authenticated as ${userData.displayName || userData.name}`
-      );
+      const guestUser = normalizeGuestSocketUser(userData);
+      if (!guestUser) {
+        callback({ success: false, error: 'Invalid guest profile' });
+        return;
+      }
+
+      socketToUser.set(socket.id, guestUser);
+      console.log(`Socket ${socket.id} authenticated as guest ${guestUser.name}`);
+      callback({ success: true, user: guestUser, source: 'guest' });
     });
 
     socket.on('restore_session', (_payload = {}, callback = () => {}) => {
@@ -1486,7 +1561,8 @@ function attachSocketManager(io) {
 
       // Generate a short 6-letter room code
       const roomId = randomFriendCode();
-      const selectedRulesets = { ...DEFAULT_RULESET_SELECTIONS };
+      const selectedRulesets = createSelectedRulesetsFromLoadout(user.rulesetLoadout)
+        || { ...DEFAULT_RULESET_SELECTIONS };
       const hostMember = createLobbyMember(user, socket.id, { isReady: true, role: 'player' });
       const lobby = {
         roomId,
@@ -1595,6 +1671,37 @@ function attachSocketManager(io) {
           : null,
         ...assignment
       });
+    });
+
+    socket.on('send_reaction', ({ roomId, emojiId } = {}, callback = () => {}) => {
+      const user = socketToUser.get(socket.id);
+      if (!user) {
+        return callback({ error: 'Not authenticated' });
+      }
+
+      const normalizedRoomId = String(roomId || '').trim().toUpperCase();
+      const currentRoom = findCurrentRoomForUser(user);
+      if (!normalizedRoomId || !currentRoom || currentRoom.roomId !== normalizedRoomId) {
+        return callback({ error: 'You are not in that room' });
+      }
+
+      if (!EMOJI_REACTION_IDS.has(String(emojiId || '').trim())) {
+        return callback({ error: 'Unknown reaction' });
+      }
+
+      io.to(normalizedRoomId).emit('player_reaction', {
+        roomId: normalizedRoomId,
+        userId: user.userId,
+        emojiId: String(emojiId).trim(),
+        createdAt: Date.now(),
+        player: {
+          userId: user.userId,
+          name: getUserDisplayName(user),
+          avatarUrl: getAvatarSource(user)
+        }
+      });
+
+      callback({ success: true });
     });
 
     // 3. Toggle Ready Status
@@ -1870,6 +1977,7 @@ function attachSocketManager(io) {
           userId: player.userId,
           socketId: player.socketId,
           name: player.displayName || player.name,
+          avatarUrl: getAvatarSource(player),
           isConnected: player.isConnected !== false
         })),
         status: 'playing',
@@ -2045,9 +2153,13 @@ function attachSocketManager(io) {
           }
 
           if (lobby.status === 'waiting') {
-            scheduleWaitingLobbyDisconnectCleanup(io, roomId, lobby, member, socket.id);
-            ensureRulesetPermissionsForPlayers(lobby);
-            emitLobbyUpdate(io, roomId, lobby);
+            if (user.guest) {
+              removeWaitingLobbyMemberOnDisconnect(io, roomId, lobby, member);
+            } else {
+              scheduleWaitingLobbyDisconnectCleanup(io, roomId, lobby, member, socket.id);
+              ensureRulesetPermissionsForPlayers(lobby);
+              emitLobbyUpdate(io, roomId, lobby);
+            }
           }
         }
       }

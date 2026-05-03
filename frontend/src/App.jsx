@@ -17,6 +17,8 @@ import {
   LogIn,
   LogOut,
   MoreHorizontal,
+  PencilLine,
+  Plus,
   RefreshCw,
   Settings,
   Sparkles,
@@ -33,7 +35,8 @@ import clsx from 'clsx';
 import { io } from 'socket.io-client';
 
 const socket = io(import.meta.env.VITE_SOCKET_URL || window.location.origin, {
-  autoConnect: false
+  autoConnect: false,
+  withCredentials: true
 });
 
 const SUIT_SYMBOLS = {
@@ -116,6 +119,24 @@ const ROOM_RULESET_OPTIONS = [
   { id: 'totalPlus', label: 'Total Plus', abbreviation: 'T+' },
   { id: 'totalMinus', label: 'Total Minus', abbreviation: 'T-' }
 ];
+const ACCOUNT_RULESET_OPTIONS = ROOM_RULESET_OPTIONS.map((option, index) => ({
+  ...option,
+  index
+}));
+const DEFAULT_REGISTER_PROFILE_PREVIEW = '/media/defaults/default-profile.gif';
+const DEFAULT_REGISTER_BANNER_PREVIEW = '/media/defaults/default-banner.jpeg';
+const EMOJI_REACTION_REGISTRY = Object.freeze([
+  { id: 'grin', label: 'Grin', glyph: '😄', animationClassName: 'is-bounce' },
+  { id: 'wink', label: 'Wink', glyph: '😉', animationClassName: 'is-wiggle' },
+  { id: 'laugh', label: 'Laugh', glyph: '😂', animationClassName: 'is-spin-pop' },
+  { id: 'shock', label: 'Shock', glyph: '😱', animationClassName: 'is-pop' },
+  { id: 'love', label: 'Love', glyph: '😍', animationClassName: 'is-pulse' },
+  { id: 'gg', label: 'GG', glyph: '🥳', animationClassName: 'is-sway' }
+]);
+const EMOJI_REACTION_MAP = Object.freeze(
+  Object.fromEntries(EMOJI_REACTION_REGISTRY.map((entry) => [entry.id, entry]))
+);
+const EMOJI_REACTION_DURATION_MS = 3200;
 const DEFAULT_ROOM_RULESET_SELECTIONS = Object.freeze(
   ROOM_RULESET_OPTIONS.reduce((acc, option) => {
     acc[option.id] = true;
@@ -281,6 +302,51 @@ function buildRulesetDownloadName(longName) {
   return `${slug || 'ruleset'}.rentz`;
 }
 
+async function requestJson(url, options = {}) {
+  const response = await fetch(url, {
+    credentials: 'include',
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {})
+    }
+  });
+
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    const message = payload?.error || 'Request failed';
+    throw new Error(message);
+  }
+
+  return payload;
+}
+
+async function serializeFileUpload(file) {
+  if (!file) {
+    return null;
+  }
+
+  const data = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`Unable to read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+  return {
+    name: file.name,
+    type: file.type,
+    size: file.size,
+    data
+  };
+}
+
 function normalizeRoomSettings(roomSettings) {
   const availableRulesets = roomSettings?.availableRulesets?.length
     ? roomSettings.availableRulesets.map((option) => ({
@@ -314,6 +380,34 @@ function normalizeRoomSettings(roomSettings) {
     visibility: roomSettings?.visibility || DEFAULT_ROOM_VISIBILITY,
     roomName: roomSettings?.roomName || ''
   };
+}
+
+function createFallbackAccountRulesetCatalog() {
+  return ACCOUNT_RULESET_OPTIONS.map((option) => ({
+    ...option,
+    type: 'per_round',
+    code: [
+      '# Ruleset preview unavailable on the client.',
+      '# The server ruleset catalog should replace this fallback automatically.'
+    ].join('\n')
+  }));
+}
+
+function createAccountEditForm(user = null) {
+  return {
+    username: user?.username || '',
+    description: user?.description || '',
+    profilePictureFile: null,
+    profilePicturePreview: user?.avatarUrl || DEFAULT_REGISTER_PROFILE_PREVIEW,
+    bannerFile: null,
+    bannerPreview: user?.banner || DEFAULT_REGISTER_BANNER_PREVIEW
+  };
+}
+
+function revokeObjectPreview(url) {
+  if (String(url || '').startsWith('blob:')) {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function hashString(value) {
@@ -373,66 +467,13 @@ function readStoredPreference(key, fallback, allowedValues) {
   }
 }
 
-function readStoredGuestSession() {
-  if (typeof window === 'undefined') {
-    return null;
-  }
-
-  try {
-    const storedValue = window.sessionStorage.getItem(STORAGE_KEYS.guestProfile);
-    if (!storedValue) {
-      return null;
-    }
-
-    const storedSession = JSON.parse(storedValue);
-    const profile = storedSession?.profile || storedSession;
-    if (!profile?.userId || !profile?.name) {
-      return null;
-    }
-
-    return {
-      profile: {
-        userId: profile.userId,
-        name: profile.name,
-        guest: true
-      },
-      roomId: storedSession?.profile ? (storedSession.roomId || null) : null
-    };
-  } catch {
-    return null;
-  }
-}
-
-function isRefreshNavigation() {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  const navigationEntry = window.performance?.getEntriesByType?.('navigation')?.[0];
-  if (navigationEntry?.type) {
-    return navigationEntry.type === 'reload';
-  }
-
-  return window.performance?.navigation?.type === 1;
-}
-
 function storeGuestProfile(profile, { roomId = null } = {}) {
   if (typeof window === 'undefined') {
     return;
   }
 
   try {
-    window.localStorage.removeItem(STORAGE_KEYS.guestProfile);
-    if (profile?.userId && profile?.name) {
-      window.sessionStorage.setItem(STORAGE_KEYS.guestProfile, JSON.stringify({
-        profile: {
-          userId: profile.userId,
-          name: profile.name,
-          guest: true
-        },
-        roomId: roomId || null
-      }));
-    } else {
+    if (!profile?.userId || !profile?.name || roomId) {
       window.sessionStorage.removeItem(STORAGE_KEYS.guestProfile);
     }
   } catch {
@@ -441,22 +482,10 @@ function storeGuestProfile(profile, { roomId = null } = {}) {
 }
 
 function updateStoredGuestRoom(roomId) {
-  const storedSession = readStoredGuestSession();
-  if (storedSession?.profile) {
-    storeGuestProfile(storedSession.profile, { roomId });
-  }
+  void roomId;
 }
 
 function readRecoverableGuestSessionForCurrentNavigation() {
-  const session = readStoredGuestSession();
-  if (!session?.profile) {
-    return null;
-  }
-
-  if (isRefreshNavigation()) {
-    return session;
-  }
-
   storeGuestProfile(null);
   return null;
 }
@@ -525,7 +554,7 @@ function getPlayerAvatarSource(player) {
     player?.profileImageUrl ||
     player?.profileImage ||
     player?.image ||
-    null
+    DEFAULT_REGISTER_PROFILE_PREVIEW
   );
 }
 
@@ -593,6 +622,91 @@ function formatMarkingSuit(trickSuit) {
   }
 
   return `${SUIT_NAMES[trickSuit].toUpperCase()} ${SUIT_SYMBOLS[trickSuit]}`;
+}
+
+function AvatarFace({
+  player,
+  alt,
+  wrapperClassName,
+  imageClassName,
+  fallbackClassName
+}) {
+  const preferredSource = getPlayerAvatarSource(player);
+  const [imageSource, setImageSource] = useState(preferredSource);
+
+  useEffect(() => {
+    setImageSource(preferredSource);
+  }, [preferredSource]);
+
+  return (
+    <div className={wrapperClassName}>
+      {imageSource ? (
+        <img
+          src={imageSource}
+          alt={alt}
+          className={imageClassName}
+          onError={() => {
+            if (imageSource !== DEFAULT_REGISTER_PROFILE_PREVIEW) {
+              setImageSource(DEFAULT_REGISTER_PROFILE_PREVIEW);
+              return;
+            }
+
+            setImageSource('');
+          }}
+        />
+      ) : (
+        <div className={fallbackClassName}>{getPlayerInitials(player)}</div>
+      )}
+    </div>
+  );
+}
+
+function EmojiReactionBubble({ player, reaction, placement = 'left', className = '' }) {
+  const reactionDefinition = reaction?.emojiId ? EMOJI_REACTION_MAP[reaction.emojiId] || null : null;
+
+  if (!reactionDefinition) {
+    return null;
+  }
+
+  return (
+    <div
+      className={clsx('rentz-reaction-bubble', placement === 'right' && 'is-right', className)}
+      role="status"
+      aria-live="polite"
+      aria-label={`${getPlayerName(player)} reacted with ${reactionDefinition.label}`}
+    >
+      <span className={clsx('rentz-reaction-bubble-emoji', reactionDefinition.animationClassName)}>
+        {reactionDefinition.glyph}
+      </span>
+      <span className="rentz-reaction-bubble-tail" aria-hidden="true" />
+    </div>
+  );
+}
+
+function MobileReactionSpotlight({ player, reaction }) {
+  if (!player || !reaction) {
+    return null;
+  }
+
+  return (
+    <div className="rentz-mobile-reaction-spotlight" role="status" aria-live="polite">
+      <div className="rentz-mobile-reaction-player">
+        <div className="rentz-avatar-wrap rentz-mobile-reaction-avatar-wrap">
+          <EmojiReactionBubble player={player} reaction={reaction} className="is-spotlight" />
+          <div className="rentz-avatar-shell rentz-mobile-reaction-avatar-shell">
+            <AvatarFace
+              player={player}
+              alt={`${getPlayerName(player)} avatar`}
+              wrapperClassName="h-full w-full"
+              imageClassName="rentz-avatar-image"
+              fallbackClassName="rentz-avatar-fallback"
+            />
+          </div>
+        </div>
+        <div className="rentz-mobile-reaction-name">{getPlayerName(player)}</div>
+      </div>
+    </div>
+  );
 }
 
 function canPlayCard({ card, hand, trickSuit, isMyTurn, trickPending, isRoundActive = true }) {
@@ -932,9 +1046,10 @@ function RentzSeatCluster({
   tricksWon = 0,
   points = null,
   mobileHero = false,
+  reaction = null,
+  reactionPlacement = 'left',
   onEmojiClick
 }) {
-  const avatarSource = getPlayerAvatarSource(player);
   const rating = getPlayerRating(player);
   const isConnected = getPlayerPresence(player);
   const showTurnMarker = isCurrent && !mobileHero;
@@ -961,30 +1076,31 @@ function RentzSeatCluster({
       </div>
 
       <div className="rentz-avatar-wrap">
-        <button
-          type="button"
-          onClick={onEmojiClick}
-          className="rentz-emoji-button"
-          title="Emoji reactions are not wired yet"
-          aria-label={`Open emoji reaction menu for ${getPlayerName(player)}`}
-        >
-          🙂
-        </button>
+        <EmojiReactionBubble player={player} reaction={reaction} placement={reactionPlacement} />
+        {isLocal && onEmojiClick && (
+          <button
+            type="button"
+            onClick={(event) => onEmojiClick(event, player)}
+            className="rentz-emoji-button"
+            title={`Open emoji reaction menu for ${getPlayerName(player)}`}
+            aria-label={`Open emoji reaction menu for ${getPlayerName(player)}`}
+          >
+            🙂
+          </button>
+        )}
         <span
           className={clsx('rentz-presence-dot', isConnected ? 'is-online' : 'is-offline')}
           title={isConnected ? 'Present in room' : 'Not currently connected'}
         />
 
         <div className="rentz-avatar-shell">
-          {avatarSource ? (
-            <img
-              src={avatarSource}
-              alt={`${getPlayerName(player)} avatar`}
-              className="rentz-avatar-image"
-            />
-          ) : (
-            <div className="rentz-avatar-fallback">{getPlayerInitials(player)}</div>
-          )}
+          <AvatarFace
+            player={player}
+            alt={`${getPlayerName(player)} avatar`}
+            wrapperClassName="h-full w-full"
+            imageClassName="rentz-avatar-image"
+            fallbackClassName="rentz-avatar-fallback"
+          />
 
           {showElo && (
             <div className="rentz-elo-badge">
@@ -1020,7 +1136,13 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
 
   return (
     <div data-seat-player-id={player?.userId} className={clsx('rentz-player-row', isCurrent && 'is-current')}>
-      <div className="rentz-player-row-avatar">{getPlayerInitials(player)}</div>
+      <AvatarFace
+        player={player}
+        alt={`${getPlayerName(player)} avatar`}
+        wrapperClassName="rentz-player-row-avatar"
+        imageClassName="rentz-player-row-avatar-image"
+        fallbackClassName="rentz-player-row-avatar-fallback"
+      />
       <div className="rentz-player-row-copy">
         <div className="rentz-player-row-name">
           {getPlayerName(player)} {isLocal ? '(You)' : ''}
@@ -1038,21 +1160,18 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
 
 function DesktopPlayerCard({ player, isCurrent, isLocal, cardCount, tricksWon, points }) {
   const rating = getPlayerRating(player);
-  const avatarSource = getPlayerAvatarSource(player);
 
   return (
     <article className={clsx('rentz-desktop-player-card', isCurrent && 'is-current', isLocal && 'is-local')}>
       <div className="rentz-desktop-player-card-top">
         <div className="rentz-desktop-player-card-avatar">
-          {avatarSource ? (
-            <img
-              src={avatarSource}
-              alt={`${getPlayerName(player)} avatar`}
-              className="rentz-desktop-player-card-avatar-image"
-            />
-          ) : (
-            <div className="rentz-desktop-player-card-avatar-fallback">{getPlayerInitials(player)}</div>
-          )}
+          <AvatarFace
+            player={player}
+            alt={`${getPlayerName(player)} avatar`}
+            wrapperClassName="h-full w-full"
+            imageClassName="rentz-desktop-player-card-avatar-image"
+            fallbackClassName="rentz-desktop-player-card-avatar-fallback"
+          />
         </div>
         <div className="rentz-desktop-player-card-copy">
           <div className="rentz-desktop-player-card-name">
@@ -1439,8 +1558,32 @@ function App() {
   const [guestProfile, setGuestProfile] = useState(null);
   const [recoverableGuestSession, setRecoverableGuestSession] = useState(() => readRecoverableGuestSessionForCurrentNavigation());
   const [isRecoveryPromptOpen, setIsRecoveryPromptOpen] = useState(() => Boolean(recoverableGuestSession?.profile));
+  const [authLoading, setAuthLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [userProfile, setUserProfile] = useState(null);
+  const [authView, setAuthView] = useState('login');
+  const [authBusyAction, setAuthBusyAction] = useState('');
+  const [authFeedback, setAuthFeedback] = useState('');
+  const [loginForm, setLoginForm] = useState({
+    username: '',
+    password: ''
+  });
+  const [registerForm, setRegisterForm] = useState({
+    username: '',
+    password: '',
+    profilePictureFile: null,
+    profilePicturePreview: '',
+    bannerFile: null,
+    bannerPreview: '',
+    description: ''
+  });
+  const [forgotPasswordUsername, setForgotPasswordUsername] = useState('');
+  const [accountEditMode, setAccountEditMode] = useState(false);
+  const [accountEditForm, setAccountEditForm] = useState(() => createAccountEditForm(null));
+  const [accountRulesetCatalog, setAccountRulesetCatalog] = useState(() => createFallbackAccountRulesetCatalog());
+  const [accountRulesetPicker, setAccountRulesetPicker] = useState(null);
+  const [accountRulesetBusyField, setAccountRulesetBusyField] = useState('');
+  const [accountImagePreview, setAccountImagePreview] = useState(null);
 
   const [gameStarted, setGameStarted] = useState(false);
   const [isSpectatingGame, setIsSpectatingGame] = useState(false);
@@ -1470,6 +1613,9 @@ function App() {
   const [isSpectatorPopoverOpen, setIsSpectatorPopoverOpen] = useState(false);
   const [pendingSpectatorJoin, setPendingSpectatorJoin] = useState(null);
   const [rulesetPreview, setRulesetPreview] = useState(null);
+  const [emojiPickerState, setEmojiPickerState] = useState(null);
+  const [activeReactions, setActiveReactions] = useState({});
+  const [mobileReactionSpotlight, setMobileReactionSpotlight] = useState(null);
   const [desktopSeatLayout, setDesktopSeatLayout] = useState([]);
   const [desktopStageTightness, setDesktopStageTightness] = useState(0);
   const [handSpreadMetrics, setHandSpreadMetrics] = useState(null);
@@ -1487,9 +1633,16 @@ function App() {
   const choiceHandScrollRef = useRef(null);
   const editorImportInputRef = useRef(null);
   const roomImportInputRef = useRef(null);
+  const accountAvatarInputRef = useRef(null);
+  const accountBannerInputRef = useRef(null);
+  const descriptionTextareaRef = useRef(null);
   const spectatorPopoverRef = useRef(null);
+  const emojiPickerRef = useRef(null);
+  const showReactionBubbleRef = useRef(() => {});
   const turnTimerWarningStateRef = useRef({ deadline: null, halfShown: false, quarterShown: false });
   const turnTimerNoticeTimeoutRef = useRef(null);
+  const reactionTimeoutsRef = useRef(new Map());
+  const mobileReactionSpotlightTimeoutRef = useRef(null);
 
   const [editorTitle, setEditorTitle] = useState('My House Rules');
   const [editorShortName, setEditorShortName] = useState('MHR');
@@ -1552,6 +1705,111 @@ function App() {
       // Ignore storage failures in restricted environments.
     }
   }, [ruleDrafts]);
+
+  useEffect(() => () => {
+    revokeObjectPreview(registerForm.profilePicturePreview);
+    revokeObjectPreview(registerForm.bannerPreview);
+  }, [registerForm.bannerPreview, registerForm.profilePicturePreview]);
+
+  useEffect(() => () => {
+    revokeObjectPreview(accountEditForm.profilePicturePreview);
+    revokeObjectPreview(accountEditForm.bannerPreview);
+  }, [accountEditForm.bannerPreview, accountEditForm.profilePicturePreview]);
+
+  const clearGuestIdentity = () => {
+    storeGuestProfile(null);
+    setRecoverableGuestSession(null);
+    setIsRecoveryPromptOpen(false);
+    setGuestProfile(null);
+  };
+
+  const applyAuthenticatedUser = (user) => {
+    const authenticated = Boolean(user?.userId);
+    activeProfileRef.current = authenticated ? user : guestProfile;
+    setIsAuthenticated(authenticated);
+    setUserProfile(authenticated ? user : null);
+
+    if (authenticated) {
+      clearGuestIdentity();
+      setGuestNameInput('');
+    }
+  };
+
+  const refreshSocketSession = () => {
+    if (socket.connected) {
+      socket.disconnect();
+    }
+
+    socket.connect();
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCurrentAccount = async () => {
+      setAuthLoading(true);
+
+      try {
+        const response = await requestJson('/api/auth/me');
+        if (cancelled) {
+          return;
+        }
+
+        applyAuthenticatedUser(response?.authenticated ? response.user : null);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        applyAuthenticatedUser(null);
+        setAuthFeedback(error.message || 'Unable to load the current account.');
+      } finally {
+        if (!cancelled) {
+          setAuthLoading(false);
+        }
+      }
+    };
+
+    void loadCurrentAccount();
+
+    return () => {
+      cancelled = true;
+    };
+    // The bootstrap runs once; `applyAuthenticatedUser` only uses stable setters and the current guest snapshot.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!accountEditMode || !descriptionTextareaRef.current) {
+      return;
+    }
+
+    descriptionTextareaRef.current.style.height = '0px';
+    descriptionTextareaRef.current.style.height = `${descriptionTextareaRef.current.scrollHeight}px`;
+  }, [accountEditMode, accountEditForm.description]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadAccountRulesetCatalog = async () => {
+      try {
+        const response = await requestJson('/api/auth/account-rulesets');
+        if (cancelled || !Array.isArray(response?.rulesets) || response.rulesets.length === 0) {
+          return;
+        }
+
+        setAccountRulesetCatalog(response.rulesets);
+      } catch {
+        // Keep the local fallback catalog if the request fails.
+      }
+    };
+
+    void loadAccountRulesetCatalog();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function applyRestoredSession(response) {
     if (!response?.success || !response.roomId || !response.lobby) {
@@ -1667,6 +1925,17 @@ function App() {
     setIsSpectatorPopoverOpen(false);
     setPendingSpectatorJoin(null);
     setRulesetPreview(null);
+    reactionTimeoutsRef.current.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    reactionTimeoutsRef.current.clear();
+    setActiveReactions({});
+    setEmojiPickerState(null);
+    if (mobileReactionSpotlightTimeoutRef.current) {
+      window.clearTimeout(mobileReactionSpotlightTimeoutRef.current);
+      mobileReactionSpotlightTimeoutRef.current = null;
+    }
+    setMobileReactionSpotlight(null);
     setLatestRoundStats(null);
     setIsStatsOpen(false);
     setMatchCompletePending(false);
@@ -1718,16 +1987,20 @@ function App() {
 
     const authenticateAndRestoreSession = () => {
       const profile = activeProfileRef.current;
+      const restoreSession = () => {
+        socket.emit('restore_session', {}, (response) => {
+          if (response?.success) {
+            applyRestoredSession(response);
+          }
+        });
+      };
+
       if (!profile?.userId) {
+        restoreSession();
         return;
       }
 
-      socket.emit('authenticate', profile);
-      socket.emit('restore_session', {}, (response) => {
-        if (response?.success) {
-          applyRestoredSession(response);
-        }
-      });
+      socket.emit('authenticate', profile, restoreSession);
     };
 
     socket.connect();
@@ -1943,6 +2216,10 @@ function App() {
       window.setTimeout(() => setErrorMsg(''), 3000);
     });
 
+    socket.on('player_reaction', (payload) => {
+      showReactionBubbleRef.current(payload || {});
+    });
+
     return () => {
       promptTimeouts.forEach((timeoutId) => {
         window.clearTimeout(timeoutId);
@@ -1964,6 +2241,7 @@ function App() {
       socket.off('lobby_removed');
       socket.off('lobby_deleted');
       socket.off('game_error');
+      socket.off('player_reaction');
     };
     // Socket listeners are registered once; reconnect auth reads the live profile from a ref.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1996,6 +2274,45 @@ function App() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [isSpectatorPopoverOpen]);
+
+  useEffect(() => {
+    if (!emojiPickerState) {
+      return undefined;
+    }
+
+    const handlePointerDown = (event) => {
+      if (emojiPickerRef.current?.contains(event.target)) {
+        return;
+      }
+
+      setEmojiPickerState(null);
+    };
+
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        setEmojiPickerState(null);
+      }
+    };
+
+    document.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [emojiPickerState]);
+
+  useEffect(() => () => {
+    reactionTimeoutsRef.current.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    reactionTimeoutsRef.current.clear();
+    if (mobileReactionSpotlightTimeoutRef.current) {
+      window.clearTimeout(mobileReactionSpotlightTimeoutRef.current);
+      mobileReactionSpotlightTimeoutRef.current = null;
+    }
+  }, []);
 
   const showTopPrompt = (message, tone = 'info') => {
     const promptId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -2180,16 +2497,377 @@ function App() {
     socket.emit('authenticate', profile);
   };
 
-  const handleLogout = () => {
+  const handleRegisterImageChange = (field, previewField, label, event) => {
+    const file = event.target.files?.[0] || null;
+
+    if (!file) {
+      setRegisterForm((current) => ({
+        ...current,
+        [field]: null,
+        [previewField]: ''
+      }));
+      return;
+    }
+
+    if (!['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'].includes(file.type)) {
+      showErrorMessage(`${label} must be a PNG, JPEG, WebP, or GIF image.`);
+      event.target.value = '';
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      showErrorMessage(`${label} must be 2 MB or smaller.`);
+      event.target.value = '';
+      return;
+    }
+
+    const nextPreview = URL.createObjectURL(file);
+    setRegisterForm((current) => {
+      revokeObjectPreview(current[previewField]);
+
+      return {
+        ...current,
+        [field]: file,
+        [previewField]: nextPreview
+      };
+    });
+  };
+
+  const replaceAccountEditForm = (nextUser) => {
+    setAccountEditForm((current) => {
+      revokeObjectPreview(current.profilePicturePreview);
+      revokeObjectPreview(current.bannerPreview);
+      return createAccountEditForm(nextUser);
+    });
+  };
+
+  const openAccountEditMode = () => {
+    replaceAccountEditForm(userProfile);
+    setAuthFeedback('');
+    setAccountEditMode(true);
+  };
+
+  const canMutateAccountProfile = () => {
+    if (inLobby || gameStarted) {
+      showErrorMessage('Leave the current room before editing this account.');
+      return false;
+    }
+
+    return true;
+  };
+
+  const getAccountRulesetDefinition = (index) => {
+    return accountRulesetCatalog.find((option) => option.index === index) || null;
+  };
+
+  const persistAccountProfileUpdate = async (payload, { busyAction = 'account-save', successMessage = '' } = {}) => {
+    setAuthBusyAction(busyAction);
+    setAuthFeedback('');
+
+    try {
+      const response = await requestJson('/api/auth/me', {
+        method: 'PATCH',
+        body: JSON.stringify(payload)
+      });
+
+      applyAuthenticatedUser(response.user);
+      refreshSocketSession();
+
+      if (successMessage) {
+        showTopPrompt(successMessage, 'success');
+      }
+
+      return response.user;
+    } catch (error) {
+      setAuthFeedback(error.message || 'Unable to update the account.');
+      throw error;
+    } finally {
+      setAuthBusyAction('');
+    }
+  };
+
+  const persistAccountRulesetIndexes = async (fieldName, nextIndexes) => {
+    setAccountRulesetBusyField(fieldName);
+    setAuthFeedback('');
+
+    try {
+      const response = await requestJson('/api/auth/me', {
+        method: 'PATCH',
+        body: JSON.stringify({ [fieldName]: nextIndexes })
+      });
+
+      applyAuthenticatedUser(response.user);
+      return response.user;
+    } catch (error) {
+      setAuthFeedback(error.message || 'Unable to update that ruleset section.');
+      throw error;
+    } finally {
+      setAccountRulesetBusyField('');
+    }
+  };
+
+  const handleSaveAccountEdits = async (event) => {
+    event?.preventDefault?.();
+
+    if (!canMutateAccountProfile()) {
+      return;
+    }
+
+    try {
+      const updatedUser = await persistAccountProfileUpdate({
+        username: accountEditForm.username,
+        description: accountEditForm.description
+      }, {
+        busyAction: 'account-save',
+        successMessage: 'Account profile updated.'
+      });
+
+      replaceAccountEditForm(updatedUser);
+      setAccountEditMode(false);
+    } catch {
+      // The request helper already surfaced a readable error.
+    }
+  };
+
+  const handleCancelAccountEdits = () => {
+    replaceAccountEditForm(userProfile);
+    setAccountEditMode(false);
+    setAuthFeedback('');
+ };
+
+  const handleAccountAssetUpload = async (fieldName, label, file) => {
+    if (!canMutateAccountProfile() || !file) {
+      return;
+    }
+
+    try {
+      const upload = await serializeFileUpload(file);
+      const payload = fieldName === 'profilePicture'
+        ? { profilePictureUpload: upload }
+        : { bannerUpload: upload };
+      const updatedUser = await persistAccountProfileUpdate(payload, {
+        busyAction: `${fieldName}-upload`,
+        successMessage: `${label} updated.`
+      });
+
+      replaceAccountEditForm(updatedUser);
+    } catch {
+      // The request helper already surfaced a readable error.
+    }
+  };
+
+  const handleDirectAccountImageChange = async (fieldName, label, event) => {
+    const file = event.target.files?.[0] || null;
+    event.target.value = '';
+
+    if (!file) {
+      return;
+    }
+
+    if (!['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'].includes(file.type)) {
+      setAuthFeedback(`${label} must be a PNG, JPEG, WebP, or GIF image.`);
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      setAuthFeedback(`${label} must be 2 MB or smaller.`);
+      return;
+    }
+
+    await handleAccountAssetUpload(fieldName, label, file);
+  };
+
+  const handleAccountRulesetPreview = (index) => {
+    const definition = getAccountRulesetDefinition(index);
+    if (!definition) {
+      return;
+    }
+
+    setRulesetPreview({
+      label: definition.label,
+      abbreviation: definition.abbreviation,
+      type: definition.type || 'per_round',
+      code: definition.code || [
+        '# Preview placeholder',
+        '# A full code listing is not available for this ruleset yet.'
+      ].join('\n')
+    });
+  };
+
+  const handleAccountRulesetOpenInEditor = (index) => {
+    const definition = getAccountRulesetDefinition(index);
+    if (!definition) {
+      return;
+    }
+
+    populateEditorFromRuleset({
+      longName: definition.label,
+      shortName: definition.abbreviation,
+      type: definition.type || 'per_round',
+      code: definition.code || [
+        '# Editor placeholder',
+        `# Start from this ${definition.label} profile preset here.`
+      ].join('\n')
+    }, {
+      linkedRoomRulesetId: null,
+      switchToEditor: true
+    });
+  };
+
+  const openAccountRulesetPicker = (fieldName, limit) => {
+    setAccountRulesetPicker({ fieldName, limit });
+  };
+
+  const handleAddAccountRuleset = async (fieldName, index) => {
+    const currentIndexes = Array.isArray(userProfile?.[fieldName]) ? userProfile[fieldName] : [];
+    if (currentIndexes.includes(index)) {
+      return;
+    }
+
+    try {
+      await persistAccountRulesetIndexes(fieldName, [...currentIndexes, index]);
+      setAccountRulesetPicker(null);
+    } catch {
+      // The request helper already surfaced a readable error.
+    }
+  };
+
+  const handleRemoveAccountRuleset = async (fieldName, index) => {
+    const currentIndexes = Array.isArray(userProfile?.[fieldName]) ? userProfile[fieldName] : [];
+
+    try {
+      await persistAccountRulesetIndexes(
+        fieldName,
+        currentIndexes.filter((entry) => entry !== index)
+      );
+    } catch {
+      // The request helper already surfaced a readable error.
+    }
+  };
+
+  const handleLoginSubmit = async (event) => {
+    event.preventDefault();
+
+    if (inLobby || gameStarted) {
+      showErrorMessage('Leave the current room before signing into another account.');
+      return;
+    }
+
+    setAuthBusyAction('login');
+    setAuthFeedback('');
+
+    try {
+      const response = await requestJson('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify(loginForm)
+      });
+
+      applyAuthenticatedUser(response.user);
+      setLoginForm({ username: '', password: '' });
+      setActiveTab('play');
+      refreshSocketSession();
+      showTopPrompt(`Signed in as ${response.user.username}.`, 'success');
+    } catch (error) {
+      setAuthFeedback(error.message || 'Unable to sign in.');
+    } finally {
+      setAuthBusyAction('');
+    }
+  };
+
+  const handleRegisterSubmit = async (event) => {
+    event.preventDefault();
+
+    if (inLobby || gameStarted) {
+      showErrorMessage('Leave the current room before creating an account.');
+      return;
+    }
+
+    setAuthBusyAction('register');
+    setAuthFeedback('');
+
+    try {
+      const profilePictureUpload = await serializeFileUpload(registerForm.profilePictureFile);
+      const bannerUpload = await serializeFileUpload(registerForm.bannerFile);
+      const response = await requestJson('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify({
+          username: registerForm.username,
+          password: registerForm.password,
+          description: registerForm.description,
+          profilePictureUpload,
+          bannerUpload
+        })
+      });
+
+      applyAuthenticatedUser(response.user);
+      if (registerForm.profilePicturePreview) {
+        URL.revokeObjectURL(registerForm.profilePicturePreview);
+      }
+      if (registerForm.bannerPreview) {
+        URL.revokeObjectURL(registerForm.bannerPreview);
+      }
+      setRegisterForm({
+        username: '',
+        password: '',
+        profilePictureFile: null,
+        profilePicturePreview: '',
+        bannerFile: null,
+        bannerPreview: '',
+        description: ''
+      });
+      setActiveTab('play');
+      refreshSocketSession();
+      showTopPrompt(`Account ${response.user.username} is ready to play.`, 'success');
+    } catch (error) {
+      setAuthFeedback(error.message || 'Unable to create the account.');
+    } finally {
+      setAuthBusyAction('');
+    }
+  };
+
+  const handleForgotPasswordSubmit = async (event) => {
+    event?.preventDefault?.();
+    setAuthBusyAction('forgot-password');
+    setAuthFeedback('');
+
+    try {
+      const response = await requestJson('/api/auth/forgot-password', {
+        method: 'POST',
+        body: JSON.stringify({ username: forgotPasswordUsername })
+      });
+
+      setAuthFeedback(response.message || 'Password reset placeholder submitted.');
+    } catch (error) {
+      setAuthFeedback(error.message || 'Unable to submit the reset request.');
+    } finally {
+      setAuthBusyAction('');
+    }
+  };
+
+  const handleLogout = async () => {
     if (inLobby || gameStarted) {
       setErrorMsg('Leave the current room before switching players.');
       window.setTimeout(() => setErrorMsg(''), 3000);
       return;
     }
 
-    setIsAuthenticated(false);
-    setUserProfile(null);
-    setActiveTab('login');
+    setAuthBusyAction('logout');
+    setAuthFeedback('');
+
+    try {
+      await requestJson('/api/auth/logout', {
+        method: 'POST'
+      });
+
+      applyAuthenticatedUser(null);
+      setActiveTab('login');
+      refreshSocketSession();
+      showTopPrompt('Signed out.', 'info');
+    } catch (error) {
+      setAuthFeedback(error.message || 'Unable to sign out.');
+    } finally {
+      setAuthBusyAction('');
+    }
   };
 
   const handleGuestReset = () => {
@@ -2200,10 +2878,7 @@ function App() {
     }
 
     setGuestNameInput(guestProfile?.name || '');
-    storeGuestProfile(null);
-    setRecoverableGuestSession(null);
-    setIsRecoveryPromptOpen(false);
-    setGuestProfile(null);
+    clearGuestIdentity();
     setActiveTab('play');
   };
 
@@ -2645,7 +3320,7 @@ function App() {
     { id: 'library', label: 'Library', icon: Library },
     { id: 'ruleset-rater', label: 'Ruleset Rater', icon: Users2 },
     { id: 'editor', label: 'Editor', icon: FileCode2 },
-    ...(!isAuthenticated ? [{ id: 'login', label: 'Login', icon: LogIn }] : [])
+    { id: 'login', label: isAuthenticated ? 'Account' : 'Login', icon: isAuthenticated ? UserRound : LogIn }
   ];
   const mobilePrimaryNavIds = new Set(['play', 'friends', 'library']);
   const mobilePrimaryNavItems = navItems.filter((item) => mobilePrimaryNavIds.has(item.id));
@@ -2720,7 +3395,9 @@ function App() {
   const turnTimerRemainingMs = activeRoundTimerDeadline
     ? Math.max(0, activeRoundTimerDeadline - timerNow)
     : 0;
-  const turnTimerRemainingSeconds = Math.ceil(turnTimerRemainingMs / 1000);
+  const turnTimerRemainingSeconds = activeRoundTimerDeadline
+    ? Math.max(0, Math.ceil(turnTimerRemainingMs / 1000))
+    : 0;
   const turnTimerTotalSeconds = roomSettings.turnTimerSeconds || TURN_TIMER_RANGE.defaultValue;
   const turnTimerProgress = activeRoundTimerDeadline
     ? clampNumber(turnTimerRemainingMs / Math.max(turnTimerTotalSeconds * 1000, 1), 0, 1)
@@ -2960,9 +3637,139 @@ function App() {
 
     return getPlayerName(left).localeCompare(getPlayerName(right));
   });
+  const getReactionParticipant = (userId) => {
+    if (!userId) {
+      return null;
+    }
 
-  const handleEmojiPrompt = (player) => {
-    showTopPrompt(`Emoji reactions are not wired yet for ${getPlayerName(player)}.`, 'info');
+    return players.find((player) => player.userId === userId)
+      || spectators.find((spectator) => spectator.userId === userId)
+      || (activeProfile?.userId === userId ? activeProfile : null);
+  };
+  const mobileReactionSpotlightPlayer = mobileReactionSpotlight
+    ? mobileReactionSpotlight.player || getReactionParticipant(mobileReactionSpotlight.userId)
+    : null;
+  const showMobileLocalBubble = Boolean(
+    myPlayer
+    && !isSpectatingGame
+    && myPlayer.userId
+    && myPlayer.userId !== nextTurnPlayer?.userId
+  );
+
+  const showReactionBubble = ({ userId, emojiId, createdAt = Date.now(), player: reactionPlayerPayload = null }) => {
+    if (!userId || !EMOJI_REACTION_MAP[emojiId]) {
+      return;
+    }
+
+    const existingTimeout = reactionTimeoutsRef.current.get(userId);
+    if (existingTimeout) {
+      window.clearTimeout(existingTimeout);
+    }
+
+    setActiveReactions((current) => ({
+      ...current,
+      [userId]: { emojiId, createdAt }
+    }));
+
+    const timeoutId = window.setTimeout(() => {
+      reactionTimeoutsRef.current.delete(userId);
+      setActiveReactions((current) => {
+        if (!current[userId]) {
+          return current;
+        }
+
+        const nextState = { ...current };
+        delete nextState[userId];
+        return nextState;
+      });
+    }, EMOJI_REACTION_DURATION_MS);
+
+    reactionTimeoutsRef.current.set(userId, timeoutId);
+
+    const shouldSpotlightOnMobile = userId !== activeProfile?.userId;
+    if (!shouldSpotlightOnMobile) {
+      return;
+    }
+
+    const reactionPlayer = getReactionParticipant(userId) || reactionPlayerPayload;
+    if (mobileReactionSpotlightTimeoutRef.current) {
+      window.clearTimeout(mobileReactionSpotlightTimeoutRef.current);
+    }
+
+    setMobileReactionSpotlight({
+      userId,
+      emojiId,
+      createdAt,
+      player: reactionPlayer
+        ? {
+          ...reactionPlayer,
+          avatarUrl: getPlayerAvatarSource(reactionPlayer)
+        }
+        : null
+    });
+
+    mobileReactionSpotlightTimeoutRef.current = window.setTimeout(() => {
+      setMobileReactionSpotlight((current) => {
+        if (!current || current.userId !== userId || current.createdAt !== createdAt) {
+          return current;
+        }
+
+        return null;
+      });
+      mobileReactionSpotlightTimeoutRef.current = null;
+    }, EMOJI_REACTION_DURATION_MS);
+  };
+  showReactionBubbleRef.current = showReactionBubble;
+
+  const handleEmojiPrompt = (event, player) => {
+    if (!player?.userId || player.userId !== activeProfile?.userId) {
+      return;
+    }
+
+    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth <= 1023;
+    if (isMobileViewport && player.userId !== nextTurnPlayer?.userId) {
+      setEmojiPickerState({
+        userId: player.userId,
+        mode: 'bottom'
+      });
+      return;
+    }
+
+    const triggerRect = event?.currentTarget?.getBoundingClientRect?.();
+    if (!triggerRect) {
+      return;
+    }
+
+    const pickerWidth = 244;
+    const pickerHeight = 196;
+    const left = Math.min(
+      Math.max(12, triggerRect.left + triggerRect.width / 2 - pickerWidth / 2),
+      window.innerWidth - pickerWidth - 12
+    );
+    const preferredTop = triggerRect.bottom + 10;
+    const top = preferredTop + pickerHeight > window.innerHeight - 12
+      ? Math.max(12, triggerRect.top - pickerHeight - 10)
+      : preferredTop;
+
+    setEmojiPickerState({
+      userId: player.userId,
+      mode: 'anchored',
+      left,
+      top
+    });
+  };
+
+  const handleEmojiReactionSelect = (emojiId) => {
+    if (!roomId || !EMOJI_REACTION_MAP[emojiId]) {
+      return;
+    }
+
+    socket.emit('send_reaction', { roomId, emojiId }, (response) => {
+      if (response?.error) {
+        showErrorMessage(response.error);
+      }
+    });
+    setEmojiPickerState(null);
   };
 
   useEffect(() => {
@@ -2983,12 +3790,27 @@ function App() {
   }, [isPlayingRound]);
 
   useEffect(() => {
-    if (!isPlayingRound || typeof choiceState?.timerRemainingMs !== 'number' || !choiceState?.timerDeadline) {
+    if (!isPlayingRound) {
       setLocalTimerDeadline(null);
+      setTimerNow(Date.now());
       return;
     }
 
-    setLocalTimerDeadline(Date.now() + Math.max(0, choiceState.timerRemainingMs));
+    const absoluteDeadline = Number(choiceState?.timerDeadline);
+    if (Number.isFinite(absoluteDeadline) && absoluteDeadline > 0) {
+      setLocalTimerDeadline(absoluteDeadline);
+      setTimerNow(Date.now());
+      return;
+    }
+
+    if (typeof choiceState?.timerRemainingMs === 'number') {
+      setLocalTimerDeadline(Date.now() + Math.max(0, choiceState.timerRemainingMs));
+      setTimerNow(Date.now());
+      return;
+    }
+
+    setLocalTimerDeadline(null);
+    setTimerNow(Date.now());
   }, [choiceState?.timerDeadline, choiceState?.timerRemainingMs, isPlayingRound]);
 
   useEffect(() => {
@@ -2996,13 +3818,12 @@ function App() {
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(() => setTimerNow(Date.now()), 0);
+    setTimerNow(Date.now());
     const intervalId = window.setInterval(() => {
       setTimerNow(Date.now());
-    }, 250);
+    }, 100);
 
     return () => {
-      window.clearTimeout(timeoutId);
       window.clearInterval(intervalId);
     };
   }, [activeRoundTimerDeadline]);
@@ -3282,9 +4103,13 @@ function App() {
                   return (
                     <div key={`${player.socketId}-${index}`} className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                       <div className="flex min-w-0 items-center gap-4">
-                        <div className="seat-avatar h-12 w-12 text-sm">
-                          {getPlayerName(player).charAt(0).toUpperCase()}
-                        </div>
+                        <AvatarFace
+                          player={player}
+                          alt={`${getPlayerName(player)} avatar`}
+                          wrapperClassName="seat-avatar h-12 w-12 text-sm"
+                          imageClassName="h-full w-full rounded-full object-cover"
+                          fallbackClassName="flex h-full w-full items-center justify-center rounded-full"
+                        />
                         <div className="min-w-0">
                           <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
                             {getPlayerName(player)} {player.socketId === socket.id ? '(You)' : ''}
@@ -3336,9 +4161,13 @@ function App() {
                   return (
                     <div key={`${spectator.socketId}-${index}`} className="glass-panel flex flex-col gap-4 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5">
                       <div className="flex min-w-0 items-center gap-4">
-                        <div className="seat-avatar h-12 w-12 text-sm">
-                          {getPlayerName(spectator).charAt(0).toUpperCase()}
-                        </div>
+                        <AvatarFace
+                          player={spectator}
+                          alt={`${getPlayerName(spectator)} avatar`}
+                          wrapperClassName="seat-avatar h-12 w-12 text-sm"
+                          imageClassName="h-full w-full rounded-full object-cover"
+                          fallbackClassName="flex h-full w-full items-center justify-center rounded-full"
+                        />
                         <div className="min-w-0">
                           <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
                             {getPlayerName(spectator)} {spectator.socketId === socket.id ? '(You)' : ''}
@@ -3822,9 +4651,13 @@ function App() {
                           key={spectator.userId || spectator.socketId || index}
                           className="rentz-spectator-entry"
                         >
-                          <div className="rentz-spectator-entry-avatar">
-                            {getPlayerInitials(spectator)}
-                          </div>
+                          <AvatarFace
+                            player={spectator}
+                            alt={`${getPlayerName(spectator)} avatar`}
+                            wrapperClassName="rentz-spectator-entry-avatar"
+                            imageClassName="rentz-spectator-entry-avatar-image"
+                            fallbackClassName="rentz-spectator-entry-avatar-fallback"
+                          />
                           <div className="rentz-spectator-entry-copy">
                             <div className="rentz-spectator-entry-name">
                               {getPlayerName(spectator)}{' '}
@@ -3844,6 +4677,12 @@ function App() {
               </div>
 
               <div className="rentz-table-brand">Rentz</div>
+              {mobileReactionSpotlightPlayer && mobileReactionSpotlight ? (
+                <MobileReactionSpotlight
+                  player={mobileReactionSpotlightPlayer}
+                  reaction={mobileReactionSpotlight}
+                />
+              ) : null}
 
               {isPlayingRound && activeRoundTimerDeadline && (
                 <div
@@ -3890,10 +4729,31 @@ function App() {
                     cardCount={nextTurnPlayer.userId === myPlayerId ? hand.length : (cardCounts[nextTurnPlayer.userId] || 0)}
                     tricksWon={(collectedHandsByPlayer[nextTurnPlayer.userId] || []).length}
                     points={getPlayerPoints(nextTurnPlayer)}
-                    onEmojiClick={() => handleEmojiPrompt(nextTurnPlayer)}
+                    reaction={activeReactions[nextTurnPlayer.userId] || null}
+                    reactionPlacement="left"
+                    onEmojiClick={handleEmojiPrompt}
                   />
                 ) : null}
               </div>
+              {showMobileLocalBubble ? (
+                <div className="rentz-mobile-local-bubble">
+                  <div className="rentz-mobile-local-label">You</div>
+                  <RentzSeatCluster
+                    player={myPlayer}
+                    seatRole="hero"
+                    isWinner={trickWinnerId === myPlayer.userId}
+                    isLocal
+                    showElo={false}
+                    showStats={false}
+                    cardCount={hand.length}
+                    tricksWon={(collectedHandsByPlayer[myPlayer.userId] || []).length}
+                    points={getPlayerPoints(myPlayer)}
+                    reaction={activeReactions[myPlayer.userId] || null}
+                    reactionPlacement="left"
+                    onEmojiClick={handleEmojiPrompt}
+                  />
+                </div>
+              ) : null}
 
               <div className="rentz-desktop-seats">
                 {desktopSeatPlayers.map((player, index) => {
@@ -3917,7 +4777,9 @@ function App() {
                         isLocal={player.userId === myPlayerId}
                         showElo={false}
                         showStats={false}
-                        onEmojiClick={() => handleEmojiPrompt(player)}
+                        reaction={activeReactions[player.userId] || null}
+                        reactionPlacement={Math.cos(seatPosition.angle) < -0.34 ? 'right' : 'left'}
+                        onEmojiClick={handleEmojiPrompt}
                       />
                     </div>
                   );
@@ -4062,7 +4924,16 @@ function App() {
   const renderPlayContent = () => {
     let playContent;
 
-    if (!activeProfile) {
+    if (authLoading && !activeProfile) {
+      playContent = (
+        <div className="relative z-10 m-auto flex w-full max-w-md flex-col gap-4 px-1 text-center">
+          <h3 className="text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Checking account session</h3>
+          <p className="text-base font-semibold text-[var(--text-secondary)] sm:text-sm">
+            Restoring your saved account before we decide whether to show guest play.
+          </p>
+        </div>
+      );
+    } else if (!activeProfile) {
       playContent = (
         <div className="relative z-10 m-auto flex w-full max-w-md flex-col gap-4 px-1 text-center">
           <h3 className="text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Play as Guest</h3>
@@ -4604,61 +5475,514 @@ function App() {
     </div>
   );
 
-  const renderLoginContent = () => (
-    <div className="grid gap-5 lg:grid-cols-[1fr_0.9fr]">
-      <section className="glass-panel p-5 sm:p-8">
-        <h3 className="mb-2 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">Account Login</h3>
-        <p className="mb-6 text-base font-semibold text-[var(--text-secondary)] sm:text-sm">
-          Guest display names now live on the Play screen. This area is reserved for registered account access instead of minting pseudo-accounts from a display name field.
-        </p>
+  const renderAccountRulesetDeck = ({ title, fieldName, limit, emptyLabel }) => {
+    const indexes = Array.isArray(userProfile?.[fieldName]) ? userProfile[fieldName] : [];
+    const slots = Array.from({ length: limit }, (_, slotIndex) => indexes[slotIndex] ?? null);
+    const isBusy = accountRulesetBusyField === fieldName;
+    const cardShellClassName = 'relative flex min-h-[13.25rem] w-full min-w-0 flex-col overflow-hidden rounded-[1.45rem] box-border p-4';
+    const gridClassName = limit === 5
+      ? 'grid grid-cols-1 justify-start gap-3 sm:grid-cols-2 md:grid-cols-3 lg:[grid-template-columns:repeat(5,var(--ruleset-card-width))]'
+      : 'grid grid-cols-1 justify-start gap-3 sm:grid-cols-2 md:grid-cols-3 lg:[grid-template-columns:repeat(3,var(--ruleset-card-width))]';
+    const gridStyle = {
+      '--ruleset-card-width': '11rem'
+    };
 
-        {!isAuthenticated ? (
-          <div className="rounded-[1.7rem] border border-dashed border-[var(--glass-border)] bg-[var(--surface-subtle)] p-5 sm:p-6">
-            <div className="text-lg font-black text-[var(--text-primary)]">Registered accounts are not wired in yet.</div>
-            <p className="mt-3 text-sm font-semibold leading-7 text-[var(--text-secondary)]">
-              Use the Play tab to choose a guest display name and jump into rooms. Once real account auth is connected, this page can host the proper sign-in flow without confusing guest names for accounts.
-            </p>
-            <button onClick={() => setActiveTab('play')} className="frutiger-button mt-5 w-full py-4 text-lg">
-              Back to Play
-            </button>
+    return (
+      <div>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h4 className="text-xl font-display font-black text-[var(--text-primary)]">{title}</h4>
+            <p className="mt-1 text-sm font-semibold text-[var(--text-secondary)]">{indexes.length}/{limit} cards filled</p>
           </div>
-        ) : (
-          <div className="rounded-[1.7rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-5 sm:p-6">
-            <div className="flex items-center gap-4">
-              <div className="seat-avatar h-14 w-14 text-lg">
-                {userProfile?.name?.charAt(0)?.toUpperCase() || 'P'}
+          {isBusy && (
+            <div className="rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] px-3 py-2 text-xs font-black uppercase tracking-[0.14em] text-[var(--text-secondary)]">
+              Saving...
+            </div>
+          )}
+        </div>
+
+        <div className={gridClassName} style={gridStyle}>
+          {slots.map((index, slotIndex) => {
+            const definition = index == null ? null : getAccountRulesetDefinition(index);
+            if (!definition) {
+              return (
+                <button
+                  key={`${fieldName}-empty-${slotIndex}`}
+                  type="button"
+                  onClick={() => openAccountRulesetPicker(fieldName, limit)}
+                  disabled={isBusy}
+                  className={clsx(cardShellClassName, 'group h-full items-center justify-center border-2 border-dashed border-[var(--glass-border)] bg-[var(--surface-soft)] text-center transition hover:border-[var(--text-secondary)] hover:bg-[var(--surface-medium)] disabled:cursor-not-allowed disabled:opacity-70')}
+                >
+                  <div className="flex h-11 w-11 items-center justify-center rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] text-[var(--text-primary)] transition group-hover:scale-105">
+                    <Plus className="h-4 w-4" />
+                  </div>
+                  <div className="mt-3 text-xs font-black uppercase tracking-[0.14em] text-[var(--text-primary)]">Add ruleset</div>
+                  <p className="mt-2 max-w-[11rem] text-xs font-semibold leading-5 text-[var(--text-secondary)]">{emptyLabel}</p>
+                </button>
+              );
+            }
+
+            return (
+              <div
+                key={`${fieldName}-${definition.index}`}
+                className={clsx(cardShellClassName, 'h-full border border-slate-300/80 shadow-[0_14px_30px_rgba(15,23,42,0.10)]')}
+                style={{
+                  background: 'linear-gradient(180deg, rgba(255,255,255,0.95) 0%, rgba(237,242,247,0.98) 100%)'
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => handleRemoveAccountRuleset(fieldName, definition.index)}
+                  disabled={isBusy}
+                  className="absolute right-3 top-3 flex h-8 w-8 items-center justify-center rounded-full border border-slate-300 bg-white/90 text-slate-700 shadow-sm transition hover:border-slate-400 hover:text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                  title={`Remove ${definition.label}`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+
+                <div className="min-w-0 pr-9">
+                  <div className="text-[9px] font-extrabold uppercase tracking-[0.22em] text-slate-500">Card {slotIndex + 1}</div>
+                  <div
+                    className="mt-2 text-[0.95rem] font-black leading-5 text-slate-950 [overflow-wrap:anywhere]"
+                    style={{
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical',
+                      overflow: 'hidden'
+                    }}
+                  >
+                    {definition.label}
+                  </div>
+                  <div className="mt-2 inline-flex rounded-full border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.16em] text-slate-700">
+                    {definition.abbreviation}
+                  </div>
+                </div>
+
+                <div className="mt-auto space-y-2 pt-4">
+                  <button
+                    type="button"
+                    onClick={() => handleAccountRulesetPreview(definition.index)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-[0.95rem] border border-slate-300 bg-white px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-slate-900 transition hover:bg-slate-100"
+                  >
+                    <FileCode2 className="h-3.5 w-3.5" />
+                    Code Preview
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleAccountRulesetOpenInEditor(definition.index)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-[0.95rem] border border-emerald-300 bg-emerald-100/85 px-3 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-emerald-950 transition hover:bg-emerald-200/80"
+                  >
+                    <Settings className="h-3.5 w-3.5" />
+                    Open Editor
+                  </button>
+                </div>
               </div>
-              <div>
-                <div className="text-2xl font-black text-[var(--text-primary)]">{userProfile?.name}</div>
-                <div className="text-sm font-semibold text-[var(--text-secondary)]">Signed in for local multiplayer</div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  const renderLoginContent = () => {
+    if (authLoading) {
+      return (
+        <section className="glass-panel p-5 sm:p-8">
+          <div className="rounded-[1.7rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-5 text-sm font-semibold text-[var(--text-secondary)] sm:p-6">
+            Checking the current account session...
+          </div>
+        </section>
+      );
+    }
+
+    if (isAuthenticated) {
+      const isSavingAccount = authBusyAction === 'account-save';
+      const isSavingAvatar = authBusyAction === 'profilePicture-upload';
+      const isSavingBanner = authBusyAction === 'banner-upload';
+      const profilePreview = userProfile?.avatarUrl || DEFAULT_REGISTER_PROFILE_PREVIEW;
+      const bannerPreview = userProfile?.banner || DEFAULT_REGISTER_BANNER_PREVIEW;
+
+      return (
+        <div className="space-y-5">
+          {authFeedback && (
+            <div className="rounded-[1.5rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">
+              {authFeedback}
+            </div>
+          )}
+
+          <section className="glass-panel overflow-hidden p-0">
+            <div className="relative border-b border-[var(--glass-border)]">
+              <button
+                type="button"
+                onClick={() => setAccountImagePreview({ src: bannerPreview, title: `${userProfile?.username || 'Account'} banner`, shape: 'landscape' })}
+                className="relative block min-h-[14rem] w-full overflow-hidden text-left transition hover:brightness-[1.04] focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+                title="View banner fullscreen"
+              >
+                <div
+                  className="absolute inset-0"
+                  style={{
+                    background: `linear-gradient(180deg, rgba(8,15,28,0.22), rgba(8,15,28,0.62)), url(${bannerPreview}) center/cover`
+                  }}
+                />
+                <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.22),transparent_45%)]" />
+              </button>
+              {accountEditMode && (
+                <button
+                  type="button"
+                  onClick={() => accountBannerInputRef.current?.click()}
+                  disabled={isSavingBanner || isSavingAccount}
+                  className="absolute bottom-4 right-4 flex items-center gap-2 rounded-full border border-white/40 bg-black/35 px-4 py-2 text-xs font-black uppercase tracking-[0.14em] text-white backdrop-blur-sm transition hover:bg-black/45 focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)] disabled:cursor-not-allowed disabled:opacity-70"
+                  title="Replace banner"
+                >
+                  <Upload className="h-4 w-4" />
+                  {isSavingBanner ? 'Uploading...' : 'Replace banner'}
+                </button>
+              )}
+              <input
+                ref={accountBannerInputRef}
+                type="file"
+                accept="image/png,image/jpeg,image/webp,image/gif"
+                onChange={(event) => handleDirectAccountImageChange('banner', 'Banner', event)}
+                className="hidden"
+              />
+            </div>
+
+            <div className="px-5 py-6 sm:px-6 sm:py-7">
+              <div className="flex flex-col gap-6 xl:flex-row xl:items-start xl:justify-between">
+                <div className="flex flex-col gap-5 sm:flex-row sm:items-start">
+                  <div className="relative shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setAccountImagePreview({ src: profilePreview, title: `${userProfile?.username || 'Account'} profile picture`, shape: 'portrait' })}
+                      className="seat-avatar h-28 w-28 text-3xl shadow-lg transition hover:scale-[1.02] focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)] sm:h-32 sm:w-32"
+                      title="View profile picture fullscreen"
+                    >
+                      <img src={profilePreview} alt="" className="h-full w-full rounded-full object-cover" />
+                    </button>
+                    {accountEditMode && (
+                      <button
+                        type="button"
+                        onClick={() => accountAvatarInputRef.current?.click()}
+                        disabled={isSavingAvatar || isSavingAccount}
+                        className="absolute bottom-1 right-1 flex h-11 w-11 items-center justify-center rounded-full border border-white/50 bg-black/55 text-white shadow-lg transition hover:bg-black/70 focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)] disabled:cursor-not-allowed disabled:opacity-70"
+                        title="Replace profile picture"
+                      >
+                        <Upload className="h-4 w-4" />
+                      </button>
+                    )}
+                    <input
+                      ref={accountAvatarInputRef}
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(event) => handleDirectAccountImageChange('profilePicture', 'Profile picture', event)}
+                      className="hidden"
+                    />
+                  </div>
+
+                  <div className="min-w-0">
+                    {accountEditMode ? (
+                      <label className="block">
+                        <span className="mb-2 block text-[10px] font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">Username</span>
+                        <input
+                          value={accountEditForm.username}
+                          onChange={(event) => setAccountEditForm((current) => ({ ...current, username: event.target.value }))}
+                          placeholder="Username"
+                          className="w-full rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 text-xl font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)] sm:min-w-[18rem]"
+                        />
+                      </label>
+                    ) : (
+                      <div className="text-3xl font-black text-[var(--text-primary)]">{userProfile?.username}</div>
+                    )}
+
+                    <div className="mt-3 inline-flex rounded-full border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-2 text-xs font-black uppercase tracking-[0.18em] text-[var(--text-secondary)]">
+                      Joined {new Date(userProfile?.accountCreatedAt || Date.now()).toLocaleDateString()}
+                    </div>
+                    <div className="mt-5 rounded-[1.45rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 sm:p-5">
+                      <div className="text-[10px] font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
+                        {accountEditMode ? 'Edit description' : 'Description'}
+                      </div>
+                      {accountEditMode ? (
+                        <textarea
+                          ref={descriptionTextareaRef}
+                          value={accountEditForm.description}
+                          onChange={(event) => setAccountEditForm((current) => ({ ...current, description: event.target.value }))}
+                          rows={1}
+                          placeholder="Tell the table what kind of Rentz player you are."
+                          className="mt-3 max-h-64 w-full max-w-full resize-none overflow-y-auto rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-semibold leading-7 text-[var(--text-primary)] shadow-inner [overflow-wrap:anywhere] break-words whitespace-pre-wrap focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+                        />
+                      ) : (
+                        <p className="mt-3 max-w-full text-sm font-semibold leading-7 text-[var(--text-primary)] [overflow-wrap:anywhere] break-words whitespace-pre-wrap">
+                          {userProfile?.description || 'No account description yet.'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex w-full flex-col gap-3 xl:w-56">
+                  {accountEditMode ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleSaveAccountEdits}
+                        disabled={isSavingAccount}
+                        className="frutiger-button w-full py-3 text-sm uppercase tracking-[0.14em] disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        {isSavingAccount ? 'Saving...' : 'Save'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleCancelAccountEdits}
+                        disabled={isSavingAccount}
+                        className="rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-70"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={openAccountEditMode}
+                      className="flex w-full items-center justify-center gap-2 rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+                    >
+                      <PencilLine className="h-4 w-4" />
+                      Edit
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    disabled={authBusyAction === 'logout' || isSavingAccount}
+                    className="rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-5 py-3 text-sm font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)] disabled:cursor-not-allowed disabled:opacity-70"
+                  >
+                    {authBusyAction === 'logout' ? 'Signing out...' : 'Log Out'}
+                  </button>
+                </div>
               </div>
             </div>
-            <button onClick={handleLogout} className="ready-button mt-6 w-full py-4 text-lg">
-              Switch Player
-            </button>
+          </section>
+
+          <section className="glass-panel p-5 sm:p-6">
+            <div className="space-y-6 overflow-x-hidden">
+              {renderAccountRulesetDeck({
+                title: 'Favourite Rulesets',
+                fieldName: 'favouriteRulesets',
+                limit: 5,
+                emptyLabel: 'Save the presets you reach for most often.'
+              })}
+              {renderAccountRulesetDeck({
+                title: 'Ruleset Loadout',
+                fieldName: 'rulesetLoadout',
+                limit: 3,
+                emptyLabel: 'Pick the pack you want ready when you host.'
+              })}
+            </div>
+          </section>
+        </div>
+      );
+    }
+
+    return (
+      <section className="glass-panel p-5 sm:p-8">
+        <h3 className="mb-2 text-2xl font-display font-black text-[var(--text-primary)] sm:text-3xl">
+          Account Access
+        </h3>
+        <p className="mb-6 text-base font-semibold text-[var(--text-secondary)] sm:text-sm">
+          Sign in with a real Rentz account, create a new one with profile details, or leave a placeholder password-reset request for future email integration.
+        </p>
+
+        {authFeedback && (
+          <div className="mb-5 rounded-[1.5rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)]">
+            {authFeedback}
           </div>
         )}
-      </section>
 
-      <section className="glass-panel p-5 sm:p-8">
-        <h4 className="mb-3 text-2xl font-display font-black text-[var(--text-primary)]">Session Status</h4>
-        <div className="space-y-3 text-sm font-semibold text-[var(--text-secondary)]">
-          <div className="status-pill flex items-center justify-between px-4 py-3">
-            <span>Authenticated</span>
-            <span>{isAuthenticated ? 'Yes' : 'No'}</span>
-          </div>
-          <div className="status-pill flex items-center justify-between px-4 py-3">
-            <span>Current room</span>
-            <span>{roomId || 'None'}</span>
-          </div>
-          <div className="status-pill flex items-center justify-between px-4 py-3">
-            <span>Game active</span>
-            <span>{gameStarted ? 'Yes' : 'No'}</span>
-          </div>
+        <div className="mb-5 grid grid-cols-2 gap-2 rounded-[1.5rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-2">
+          {[
+            { id: 'login', label: 'Login' },
+            { id: 'register', label: 'Create account' }
+          ].map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              onClick={() => setAuthView(option.id)}
+              className={clsx(
+                'rounded-[1.15rem] px-3 py-3 text-xs font-black uppercase tracking-[0.12em] transition sm:text-sm',
+                (authView === option.id || (option.id === 'login' && authView === 'forgot-password'))
+                  ? 'border border-white/80 bg-[var(--surface-solid)] text-[var(--text-primary)] shadow-md'
+                  : 'text-[var(--text-secondary)] hover:bg-[var(--surface-medium)]'
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
+
+        {(authView === 'login' || authView === 'forgot-password') && (
+          <form onSubmit={handleLoginSubmit} className="space-y-4 rounded-[1.7rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-5 sm:p-6">
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Username</span>
+              <input
+                value={loginForm.username}
+                onChange={(event) => setLoginForm((current) => ({ ...current, username: event.target.value }))}
+                placeholder="Enter your username"
+                className="w-full rounded-[1.25rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+              />
+            </label>
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Password</span>
+              <input
+                type="password"
+                value={loginForm.password}
+                onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))}
+                placeholder="Enter your password"
+                className="w-full rounded-[1.25rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+              />
+            </label>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => setAuthView('forgot-password')}
+                className="text-xs font-black uppercase tracking-[0.14em] text-[var(--text-secondary)] transition hover:text-[var(--text-primary)]"
+              >
+                Forgot password?
+              </button>
+            </div>
+            <button type="submit" disabled={Boolean(authBusyAction)} className="frutiger-button w-full py-4 text-base disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg">
+              {authBusyAction === 'login' ? 'Signing in...' : 'Login'}
+            </button>
+            {authView === 'forgot-password' && (
+              <div className="rounded-[1.35rem] border border-dashed border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <div className="text-sm font-semibold leading-7 text-[var(--text-secondary)]">
+                  The email reset pipeline is not built yet. This placeholder records the request cleanly so mail delivery can be added later.
+                </div>
+                <div className="mt-4 space-y-3">
+                  <label className="block">
+                    <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Username</span>
+                    <input
+                      value={forgotPasswordUsername}
+                      onChange={(event) => setForgotPasswordUsername(event.target.value)}
+                      placeholder="Which account needs help?"
+                      className="w-full rounded-[1.25rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+                    />
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setAuthView('login')}
+                      className="rounded-[1.2rem] border border-[var(--glass-border)] bg-[var(--surface-medium)] px-4 py-3 text-xs font-black uppercase tracking-[0.14em] text-[var(--text-primary)] transition hover:bg-[var(--surface-hover)]"
+                    >
+                      Back to login
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleForgotPasswordSubmit}
+                      disabled={Boolean(authBusyAction)}
+                      className="frutiger-button px-4 py-3 text-xs uppercase tracking-[0.14em] disabled:cursor-not-allowed disabled:opacity-70"
+                    >
+                      {authBusyAction === 'forgot-password' ? 'Submitting request...' : 'Request password help'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </form>
+        )}
+
+        {authView === 'register' && (
+          <form onSubmit={handleRegisterSubmit} className="space-y-4 rounded-[1.7rem] border border-[var(--glass-border)] bg-[var(--surface-subtle)] p-5 sm:p-6">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Username</span>
+                <input
+                  value={registerForm.username}
+                  onChange={(event) => setRegisterForm((current) => ({ ...current, username: event.target.value }))}
+                  placeholder="Unique username"
+                  className="w-full rounded-[1.25rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+                />
+              </label>
+              <label className="block">
+                <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Password</span>
+                <input
+                  type="password"
+                  value={registerForm.password}
+                  onChange={(event) => setRegisterForm((current) => ({ ...current, password: event.target.value }))}
+                  placeholder="Minimum 8 characters"
+                  className="w-full rounded-[1.25rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-black text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+                />
+              </label>
+            </div>
+
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Profile picture</span>
+              <div className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <div className="flex items-center gap-4">
+                  <div className="seat-avatar h-16 w-16 text-lg shadow-sm">
+                    {registerForm.profilePicturePreview ? (
+                      <img src={registerForm.profilePicturePreview || DEFAULT_REGISTER_PROFILE_PREVIEW} alt="" className="h-full w-full rounded-full object-cover" />
+                    ) : (
+                      <img src={DEFAULT_REGISTER_PROFILE_PREVIEW} alt="" className="h-full w-full rounded-full object-cover" />
+                    )}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp,image/gif"
+                      onChange={(event) => handleRegisterImageChange('profilePictureFile', 'profilePicturePreview', 'Profile picture', event)}
+                      className="block w-full text-sm font-semibold text-[var(--text-primary)] file:mr-4 file:rounded-full file:border-0 file:bg-[var(--surface-medium)] file:px-4 file:py-2 file:text-xs file:font-black file:uppercase file:tracking-[0.14em] file:text-[var(--text-primary)] hover:file:bg-[var(--surface-hover)]"
+                    />
+                    <p className="mt-2 text-xs font-semibold leading-6 text-[var(--text-secondary)]">
+                      Optional. PNG, JPEG, WebP, or GIF up to 2 MB. If you skip this, the provided default profile picture will be used.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Banner</span>
+              <div className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4">
+                <div className="space-y-3">
+                  <div className="h-28 overflow-hidden rounded-[1.1rem] border border-[var(--glass-border)] bg-[var(--surface-medium)]">
+                    {registerForm.bannerPreview ? (
+                      <img src={registerForm.bannerPreview || DEFAULT_REGISTER_BANNER_PREVIEW} alt="" className="h-full w-full object-cover" />
+                    ) : (
+                      <img src={DEFAULT_REGISTER_BANNER_PREVIEW} alt="" className="h-full w-full object-cover" />
+                    )}
+                  </div>
+                  <input
+                    type="file"
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    onChange={(event) => handleRegisterImageChange('bannerFile', 'bannerPreview', 'Banner', event)}
+                    className="block w-full text-sm font-semibold text-[var(--text-primary)] file:mr-4 file:rounded-full file:border-0 file:bg-[var(--surface-medium)] file:px-4 file:py-2 file:text-xs file:font-black file:uppercase file:tracking-[0.14em] file:text-[var(--text-primary)] hover:file:bg-[var(--surface-hover)]"
+                  />
+                  <p className="text-xs font-semibold leading-6 text-[var(--text-secondary)]">
+                    Optional. PNG, JPEG, WebP, or GIF up to 2 MB. If you skip this, the provided default banner will be used.
+                  </p>
+                </div>
+              </div>
+            </label>
+
+            <label className="block">
+              <span className="mb-2 block text-xs font-black uppercase tracking-[0.16em] text-[var(--text-secondary)]">Description</span>
+              <textarea
+                value={registerForm.description}
+                onChange={(event) => setRegisterForm((current) => ({ ...current, description: event.target.value }))}
+                placeholder="Tell the table what kind of Rentz player you are."
+                rows={4}
+                className="w-full rounded-[1.25rem] border border-[var(--glass-border)] bg-[var(--surface-input)] px-4 py-3 font-semibold text-[var(--text-primary)] shadow-inner focus:outline-none focus:ring-4 focus:ring-[var(--accent-glow)]"
+              />
+            </label>
+
+            <button type="submit" disabled={Boolean(authBusyAction)} className="frutiger-button w-full py-4 text-base disabled:cursor-not-allowed disabled:opacity-70 sm:text-lg">
+              {authBusyAction === 'register' ? 'Creating account...' : 'Create account'}
+            </button>
+          </form>
+        )}
       </section>
-    </div>
-  );
+    );
+  };
 
   const renderPlaceholderModule = (title, body) => (
     <div className="glass-panel min-h-[60vh] p-5 sm:p-8">
@@ -5337,6 +6661,98 @@ endif`}
         >
           <div className="rounded-[1.4rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 text-sm font-semibold leading-6 text-[var(--text-secondary)] sm:text-base">
             <span className="font-black text-[var(--text-primary)]">{pendingSpectatorJoin.roomName || pendingSpectatorJoin.roomId}</span> is already in a game. You can still enter the room as a spectator.
+          </div>
+        </ModalShell>
+      )}
+
+      {emojiPickerState && (
+        <div
+          ref={emojiPickerRef}
+          className={clsx('rentz-emoji-picker', emojiPickerState.mode === 'bottom' && 'is-bottom-sheet')}
+          style={emojiPickerState.mode === 'bottom'
+            ? undefined
+            : {
+              left: `${emojiPickerState.left}px`,
+              top: `${emojiPickerState.top}px`
+            }}
+        >
+          <div className="rentz-emoji-picker-title">React</div>
+          <div className="rentz-emoji-picker-grid">
+            {EMOJI_REACTION_REGISTRY.map((emoji) => (
+              <button
+                key={emoji.id}
+                type="button"
+                onClick={() => handleEmojiReactionSelect(emoji.id)}
+                className="rentz-emoji-choice"
+                title={emoji.label}
+                aria-label={emoji.label}
+              >
+                <span className={clsx('rentz-emoji-choice-glyph', emoji.animationClassName)}>{emoji.glyph}</span>
+                <span className="rentz-emoji-choice-label">{emoji.label}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {accountRulesetPicker && (
+        <ModalShell
+          title={accountRulesetPicker.fieldName === 'favouriteRulesets' ? 'Add Favourite Ruleset' : 'Add Ruleset to Loadout'}
+          eyebrow={accountRulesetPicker.fieldName === 'favouriteRulesets' ? 'Account profile' : 'Game-ready pack'}
+          onClose={() => setAccountRulesetPicker(null)}
+        >
+          <div className="space-y-3">
+            {accountRulesetCatalog
+              .filter((option) => !(Array.isArray(userProfile?.[accountRulesetPicker.fieldName]) ? userProfile[accountRulesetPicker.fieldName] : []).includes(option.index))
+              .map((option) => (
+                <button
+                  key={option.index}
+                  type="button"
+                  onClick={() => handleAddAccountRuleset(accountRulesetPicker.fieldName, option.index)}
+                  disabled={accountRulesetBusyField === accountRulesetPicker.fieldName}
+                  className="w-full rounded-[1.35rem] border border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 text-left transition hover:bg-[var(--surface-medium)] disabled:cursor-not-allowed disabled:opacity-70"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div>
+                      <div className="text-lg font-black text-[var(--text-primary)]">{option.label}</div>
+                      <div className="mt-1 text-xs font-extrabold uppercase tracking-[0.18em] text-[var(--text-secondary)]">{option.abbreviation}</div>
+                    </div>
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full border border-[var(--glass-border)] bg-[var(--surface-medium)] text-[var(--text-primary)]">
+                      <Plus className="h-4 w-4" />
+                    </div>
+                  </div>
+                </button>
+              ))}
+
+            {accountRulesetCatalog.filter((option) => !(Array.isArray(userProfile?.[accountRulesetPicker.fieldName]) ? userProfile[accountRulesetPicker.fieldName] : []).includes(option.index)).length === 0 && (
+              <div className="rounded-[1.35rem] border border-dashed border-[var(--glass-border)] bg-[var(--surface-soft)] p-4 text-sm font-semibold leading-7 text-[var(--text-secondary)]">
+                Every available built-in ruleset is already in this section.
+              </div>
+            )}
+          </div>
+        </ModalShell>
+      )}
+
+      {accountImagePreview && (
+        <ModalShell
+          title={accountImagePreview.title}
+          eyebrow="Fullscreen preview"
+          onClose={() => setAccountImagePreview(null)}
+          wide
+          bodyClassName="mt-5 min-h-0 flex-1 overflow-auto"
+          panelClassName="max-w-5xl"
+        >
+          <div className="flex min-h-[24rem] items-center justify-center rounded-[1.6rem] border border-[var(--glass-border)] bg-[rgba(7,11,22,0.92)] p-3 sm:p-5">
+            <img
+              src={accountImagePreview.src}
+              alt=""
+              className={clsx(
+                'max-h-[70vh] w-auto object-contain',
+                accountImagePreview.shape === 'portrait'
+                  ? 'rounded-[2rem] border border-white/15 shadow-[0_20px_50px_rgba(0,0,0,0.35)]'
+                  : 'rounded-[1.5rem]'
+              )}
+            />
           </div>
         </ModalShell>
       )}
