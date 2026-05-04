@@ -1859,6 +1859,26 @@
     transform: rotate(-2deg);
   }
 
+  .rentz-player-name-label {
+    display: flex;
+    max-width: 100%;
+    min-width: 0;
+    align-items: baseline;
+    gap: 0.28rem;
+  }
+
+  .rentz-player-name-value {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .rentz-player-name-self {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
   .rentz-seat-cluster {
     position: relative;
     z-index: 9;
@@ -1912,10 +1932,11 @@
   }
 
   .rentz-seat-name {
+    display: flex;
+    justify-content: center;
+    align-items: baseline;
     max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
     color: #7dd2ff;
     font-size: clamp(0.82rem, 1.1vw, 1rem);
     font-weight: 900;
@@ -2722,9 +2743,9 @@
   }
 
   .rentz-player-row-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
     color: #1a2934;
     font-size: 0.96rem;
     font-weight: 900;
@@ -2832,9 +2853,9 @@
   }
 
   .rentz-desktop-player-card-name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    display: flex;
+    min-width: 0;
+    align-items: baseline;
     color: #1a2934;
     font-size: 0.98rem;
     font-weight: 900;
@@ -3662,7 +3683,7 @@
       align-items: start;
       column-gap: 0.75rem;
       row-gap: 0.85rem;
-      min-height: 25.5rem;
+      min-height: 26.25rem;
       padding: 0.9rem 0.9rem 1rem;
     }
 
@@ -3686,26 +3707,14 @@
 
     .rentz-mobile-local-bubble {
       display: flex;
-      grid-column: 2;
-      grid-row: 4 / span 2;
+      position: absolute;
+      right: clamp(4.6rem, 18vw, 5.9rem);
+      bottom: 0.9rem;
       flex-direction: column;
-      align-self: end;
-      justify-self: start;
-      gap: 0.4rem;
+      align-items: flex-end;
       min-width: 0;
-      max-width: 100%;
-      transform: translateX(-28%);
+      max-width: min(9.5rem, calc(100% - 6rem));
       z-index: 11;
-    }
-
-    .rentz-mobile-local-label {
-      color: #dff8ff;
-      font-size: 0.72rem;
-      font-weight: 950;
-      letter-spacing: 0.14em;
-      text-align: center;
-      text-transform: uppercase;
-      text-shadow: 0 2px 6px rgba(0,0,0,0.34);
     }
 
     .rentz-board-area {
@@ -3863,7 +3872,7 @@
 
     .rentz-mobile-local-bubble .rentz-seat-cluster {
       width: min(100%, 9.5rem);
-      margin-inline: 0 auto;
+      margin-inline: auto 0;
     }
 
     .rentz-mobile-local-bubble .rentz-avatar-shell {
@@ -3887,7 +3896,7 @@
 
     .rentz-table-stage {
       grid-template-columns: minmax(0, 1fr) minmax(5.8rem, 34%);
-      min-height: 23rem;
+      min-height: 23.75rem;
       row-gap: 0.72rem;
       padding: 0.8rem 0.8rem 0.9rem;
     }
@@ -3947,10 +3956,6 @@
       bottom: 0.26rem;
     }
 
-    .rentz-mobile-local-bubble {
-      transform: translateX(-32%);
-    }
-
     .rentz-emoji-picker.is-bottom-sheet {
       bottom: calc(env(safe-area-inset-bottom) + 0.65rem);
       width: min(19rem, calc(100vw - 0.85rem));
@@ -3967,7 +3972,7 @@
       grid-template-columns: minmax(0, 1fr) minmax(4.9rem, 36%);
       column-gap: 0.55rem;
       row-gap: 0.65rem;
-      min-height: 21.5rem;
+      min-height: 22.25rem;
     }
 
     .rentz-current-game-box {
@@ -4021,14 +4026,6 @@
       left: 50%;
       bottom: 0.22rem;
       max-width: min(calc(100% - 5.8rem), 9.4rem);
-    }
-
-    .rentz-mobile-local-bubble {
-      transform: translateX(-38%);
-    }
-
-    .rentz-mobile-local-bubble {
-      gap: 0.3rem;
     }
 
     .rentz-mobile-local-bubble .rentz-seat-cluster {

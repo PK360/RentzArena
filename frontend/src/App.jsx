@@ -558,6 +558,19 @@ function getPlayerAvatarSource(player) {
   );
 }
 
+function PlayerNameLabel({ player, isLocal = false, className = '', nameClassName = '', suffixClassName = '' }) {
+  return (
+    <span className={clsx('rentz-player-name-label', className)}>
+      <span className={clsx('rentz-player-name-value', nameClassName)}>
+        {getPlayerName(player)}
+      </span>
+      {isLocal ? (
+        <span className={clsx('rentz-player-name-self', suffixClassName)}>(You)</span>
+      ) : null}
+    </span>
+  );
+}
+
 function getPlayerRating(player) {
   return player?.elo ?? player?.rating ?? player?.mmr ?? player?.rank ?? null;
 }
@@ -1071,9 +1084,11 @@ function RentzSeatCluster({
         />
       )}
 
-      <div className="rentz-seat-name">
-        {getPlayerName(player)} {isLocal ? '(You)' : ''}
-      </div>
+      <PlayerNameLabel
+        player={player}
+        isLocal={isLocal}
+        className="rentz-seat-name"
+      />
 
       <div className="rentz-avatar-wrap">
         <EmojiReactionBubble player={player} reaction={reaction} placement={reactionPlacement} />
@@ -1144,9 +1159,11 @@ function CompactPlayerRow({ player, isCurrent, isLocal, cardCount, tricksWon, po
         fallbackClassName="rentz-player-row-avatar-fallback"
       />
       <div className="rentz-player-row-copy">
-        <div className="rentz-player-row-name">
-          {getPlayerName(player)} {isLocal ? '(You)' : ''}
-        </div>
+        <PlayerNameLabel
+          player={player}
+          isLocal={isLocal}
+          className="rentz-player-row-name"
+        />
         <div className="rentz-player-row-meta">
           <span>{rating == null ? 'ELO --' : `ELO ${rating}`}</span>
           <span>{cardCount} cards</span>
@@ -1174,9 +1191,11 @@ function DesktopPlayerCard({ player, isCurrent, isLocal, cardCount, tricksWon, p
           />
         </div>
         <div className="rentz-desktop-player-card-copy">
-          <div className="rentz-desktop-player-card-name">
-            {getPlayerName(player)} {isLocal ? '(You)' : ''}
-          </div>
+          <PlayerNameLabel
+            player={player}
+            isLocal={isLocal}
+            className="rentz-desktop-player-card-name"
+          />
           <div className="rentz-desktop-player-card-rating">
             {rating == null ? 'ELO --' : `ELO ${rating}`} <span aria-hidden="true">★</span>
           </div>
@@ -3162,13 +3181,26 @@ function App() {
   };
 
   const handleRoomRulesetToggle = (ruleId) => {
-    setDraftRoomSettings((current) => ({
-      ...current,
-      selectedRulesets: {
-        ...current.selectedRulesets,
-        [ruleId]: !current.selectedRulesets[ruleId]
-      }
-    }));
+    setDraftRoomSettings((current) => {
+      const nextEnabled = !current.selectedRulesets[ruleId];
+      const nextRulesetPermissions = { ...(current.rulesetPermissions || {}) };
+
+      players.forEach((player) => {
+        nextRulesetPermissions[player.userId] = {
+          ...(nextRulesetPermissions[player.userId] || {}),
+          [ruleId]: nextEnabled
+        };
+      });
+
+      return {
+        ...current,
+        selectedRulesets: {
+          ...current.selectedRulesets,
+          [ruleId]: nextEnabled
+        },
+        rulesetPermissions: nextRulesetPermissions
+      };
+    });
   };
 
   const handlePlayerRulesetPermissionToggle = (playerId, ruleId) => {
@@ -3686,7 +3718,7 @@ function App() {
 
     reactionTimeoutsRef.current.set(userId, timeoutId);
 
-    const shouldSpotlightOnMobile = userId !== activeProfile?.userId;
+    const shouldSpotlightOnMobile = userId !== activeProfile?.userId && userId !== nextTurnPlayer?.userId;
     if (!shouldSpotlightOnMobile) {
       return;
     }
@@ -3723,15 +3755,6 @@ function App() {
 
   const handleEmojiPrompt = (event, player) => {
     if (!player?.userId || player.userId !== activeProfile?.userId) {
-      return;
-    }
-
-    const isMobileViewport = typeof window !== 'undefined' && window.innerWidth <= 1023;
-    if (isMobileViewport && player.userId !== nextTurnPlayer?.userId) {
-      setEmojiPickerState({
-        userId: player.userId,
-        mode: 'bottom'
-      });
       return;
     }
 
@@ -4111,9 +4134,11 @@ function App() {
                           fallbackClassName="flex h-full w-full items-center justify-center rounded-full"
                         />
                         <div className="min-w-0">
-                          <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
-                            {getPlayerName(player)} {player.socketId === socket.id ? '(You)' : ''}
-                          </div>
+                          <PlayerNameLabel
+                            player={player}
+                            isLocal={player.socketId === socket.id}
+                            className="text-lg font-black text-[var(--text-primary)] sm:text-xl"
+                          />
                           <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                             {isHostPlayer ? 'Host Player' : 'Player'}
                           </div>
@@ -4169,9 +4194,11 @@ function App() {
                           fallbackClassName="flex h-full w-full items-center justify-center rounded-full"
                         />
                         <div className="min-w-0">
-                          <div className="truncate text-lg font-black text-[var(--text-primary)] sm:text-xl">
-                            {getPlayerName(spectator)} {spectator.socketId === socket.id ? '(You)' : ''}
-                          </div>
+                          <PlayerNameLabel
+                            player={spectator}
+                            isLocal={spectator.socketId === socket.id}
+                            className="text-lg font-black text-[var(--text-primary)] sm:text-xl"
+                          />
                           <div className="text-xs font-extrabold uppercase tracking-[0.2em] text-[var(--text-secondary)]">
                             {isHostSpectator ? 'Host Spectator' : 'Spectator'}
                           </div>
@@ -4659,10 +4686,11 @@ function App() {
                             fallbackClassName="rentz-spectator-entry-avatar-fallback"
                           />
                           <div className="rentz-spectator-entry-copy">
-                            <div className="rentz-spectator-entry-name">
-                              {getPlayerName(spectator)}{' '}
-                              {spectator.socketId === socket.id ? '(You)' : ''}
-                            </div>
+                            <PlayerNameLabel
+                              player={spectator}
+                              isLocal={spectator.socketId === socket.id}
+                              className="rentz-spectator-entry-name"
+                            />
                             <div className="rentz-spectator-entry-meta">
                               {spectator.userId === lobbyHostId ? 'Host spectating' : 'Watching the table'}
                             </div>
@@ -4737,7 +4765,6 @@ function App() {
               </div>
               {showMobileLocalBubble ? (
                 <div className="rentz-mobile-local-bubble">
-                  <div className="rentz-mobile-local-label">You</div>
                   <RentzSeatCluster
                     player={myPlayer}
                     seatRole="hero"

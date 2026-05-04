@@ -1,6 +1,5 @@
 const Game = require('./models/Game');
 const { randomFriendCode } = require('./utils/helpers');
-const { createSelectedRulesetsFromLoadout } = require('./src/lib/accountRulesets');
 const { DEFAULT_PROFILE_PICTURE_PATH } = require('./src/lib/accountAssets');
 const { getAuthenticatedUserFromCookieHeader, serializeAccount } = require('./src/lib/auth');
 const { generateDeck, shuffle, dealCards } = require('./utils/cards');
@@ -1561,8 +1560,7 @@ function attachSocketManager(io) {
 
       // Generate a short 6-letter room code
       const roomId = randomFriendCode();
-      const selectedRulesets = createSelectedRulesetsFromLoadout(user.rulesetLoadout)
-        || { ...DEFAULT_RULESET_SELECTIONS };
+      const selectedRulesets = { ...DEFAULT_RULESET_SELECTIONS };
       const hostMember = createLobbyMember(user, socket.id, { isReady: true, role: 'player' });
       const lobby = {
         roomId,
